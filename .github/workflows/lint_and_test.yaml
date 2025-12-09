@@ -50,10 +50,10 @@ jobs:
           export CF_SOFTWARE_BASE="$PWD/columnflow_venv/software"
           
           echo "Running full setup..."
-          which micromamba
-          micromamba --version 
           #source "$CF_BASE/setup.sh" "" || true
           source setup.sh "githubtest"
+          which micromamba
+          micromamba --version 
 
       - name: Lint 🔍
         run: |
