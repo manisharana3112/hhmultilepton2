@@ -46,6 +46,7 @@ jobs:
           export GITHUB_ACTIONS="true"
           export CF_REMOTE_ENV="true"
           export CF_SETUP_NAME="github_actions"
+          export CF_REPO_BASE=$PWD
           export CF_BASE="$CF_REPO_BASE/modules/columnflow"
           export CF_SOFTWARE_BASE="$CF_REPO_BASE/columnflow_venv/software"
           export CF_SKIP_SETUP="false"
