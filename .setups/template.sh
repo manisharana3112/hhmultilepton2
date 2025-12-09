@@ -15,21 +15,21 @@ export CF_SCHEDULER_PORT="8082"
 export CF_FLAVOR="cms"
 export LAW_CMS_VO="cms"
 
-# on manivald
+#===== on manivald ==========
 export CF_CRAB_STORAGE_ELEMENT="T2_EE_Estonia"
 export CF_SLURM_FLAVOR="manivald"
 export CF_SLURM_PARTITION="main"
-export CF_CLUSTER_LOCAL_PATH="/local/$CF_CERN_USER/HHMultilepton_Run3/"
+export CF_CLUSTER_LOCAL_PATH="/scratch/local/$CF_CERN_USER/HHMultilepton_Run3/"
 export CF_CRAB_BASE_DIRECTORY="/store/user/$CF_CERN_USER/HHMultilepton_Run3/cf_crab_outputs"
 export TMPDIR="/scratch/local/$CF_CERN_USER"
-
-# on lxplus
+#============================
+#===== on lxplus ============
 #export CF_CRAB_STORAGE_ELEMENT="T2_CH_CERN"
 #export CF_HTCONDOR_FLAVOR="cern_el9"   # or "cern" for older versions of lxplus not using ELMA9
 #export CF_CLUSTER_LOCAL_PATH="/eos/user/$CF_CERN_USER_FIRSTCHAR/$CF_CERN_USER/HHMultilepton_Run3/"
 #export CF_CRAB_BASE_DIRECTORY="$CF_CLUSTER_LOCAL_PATH/cf_crab_outputs"
 #export TMPDIR="/tmp/$CF_CERN_USER"
-
+#============================
 
 export CF_STORE_LOCAL="$CF_CLUSTER_LOCAL_PATH/$CF_STORE_NAME"
 export CF_WLCG_CACHE_ROOT="$CF_CLUSTER_LOCAL_PATH/cf_scratch"

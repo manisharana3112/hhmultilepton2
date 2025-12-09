@@ -26,11 +26,12 @@ jobs:
           # Create a default setup file
           cat > .setups/githubtest.sh << 'EOF'
           export CF_CERN_USER="github"
-          export CF_DATA="$PWD/data"
-          export CF_SOFTWARE_BASE="$PWD/columnflow_venv/software"
-          export CF_JOB_BASE="$PWD/data/jobs"
+          export CF_DATA="$CF_REPO_BASE/columnflow_venv"
+          export CF_SOFTWARE_BASE="$CF_DATA/software"
+          export CF_VENV_BASE="$CF_SOFTWARE_BASE/venvs"
+          export CF_JOB_BASE="$CF_SOFTWARE_BASE/data/jobs"
           export CF_STORE_NAME="cf_store"
-          export CF_STORE_LOCAL="$PWD/data/cf_store"
+          export CF_STORE_LOCAL="$CF_REPO_BASE/data/$CF_STORE_NAME"
           export CF_WLCG_CACHE_ROOT=""
           export CF_VENV_SETUP_MODE_UPDATE="false"
           export CF_INTERACTIVE_VENV_FILE=""
@@ -44,18 +45,13 @@ jobs:
           export CI="true"
           export GITHUB_ACTIONS="true"
           export CF_REMOTE_ENV="true"
-          export CF_BASE="$PWD/modules/columnflow"
-          export CF_REPO_BASE="$PWD"
           export CF_SETUP_NAME="github_actions"
-          export CF_SOFTWARE_BASE="$PWD/columnflow_venv/software"
+          export CF_BASE="$CF_REPO_BASE/modules/columnflow"
+          export CF_SOFTWARE_BASE="$CF_REPO_BASE/columnflow_venv/software"
           export CF_SKIP_SETUP="false"
+          export CF_REPO_BASE_ALIAS="MULTILEPTON_BASE"
 
           echo "Running full setup..."
-          
-          echo "=== Step 1: Run columnflow setup ==="
-          source "$CF_BASE/setup.sh" "" || true
-          
-          echo "=== Step 2: Run main setup ==="
           source setup.sh "githubtest"
  
           which micromamba
