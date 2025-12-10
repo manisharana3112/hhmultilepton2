@@ -8,7 +8,7 @@ import functools
 
 import order as od
 
-from columnflow.config_util import add_category, create_category_combinations, CategoryGroup
+from columnflow.config_util import add_category
 from columnflow.types import Any
 
 
@@ -19,7 +19,6 @@ def add_categories(config: od.Config) -> None:
     # root category (-1 has special meaning in cutflow)
     root_cat = add_category(config, name="all", id=-1, selection="cat_all", label="")
     _add_category = functools.partial(add_category, parent=root_cat)
-    
     # lepton channels
     _add_category(config, name="cetau", id=1, selection="cat_etau", label=config.channels.n.cetau.label)
     _add_category(config, name="cmutau", id=2, selection="cat_mutau", label=config.channels.n.cmutau.label)
@@ -40,10 +39,10 @@ def add_categories(config: od.Config) -> None:
     _add_category(config, name="cat1l3tau_SB", id=1010, selection="cat_1l3tau_SB", label=r"$1\ell 3\tau_h$ SB")
     _add_category(config, name="cat4tau_SR", id=1011, selection="cat_4tau_SR", label=r"$4\tau_h$ SR")
     _add_category(config, name="cat4tau_SB", id=1012, selection="cat_4tau_SB", label=r"$4\tau_h$ SB")
-    _add_category(config, name="cat2l0or1tau_SR_SS", id=1013, selection="cat_2l0or1tau_SR_SS", label=r"$2\ell\  \leq 1\,\tau_{h}$ SR, SS")
-    _add_category(config, name="cat2l0or1tau_SR_OS", id=1014, selection="cat_2l0or1tau_SR_OS", label=r"$2\ell\  \leq 1\,\tau_{h}$ SR, OS")
-    _add_category(config, name="cat2l0or1tau_SB_SS", id=1015, selection="cat_2l0or1tau_SB_SS", label=r"$2\ell\  \leq 1\,\tau_{h}$ SB, SS")
-    _add_category(config, name="cat2l0or1tau_SB_OS", id=1016, selection="cat_2l0or1tau_SB_OS", label=r"$2\ell\  \leq 1\,\tau_{h}$ SB, OS")
+    _add_category(config, name="cat2l0or1tau_SR_SS", id=1013, selection="cat_2l0or1tau_SR_SS", label=r"$2\ell\  \leq 1\,\tau_{h}$ SR, SS")  # noqa: E501
+    _add_category(config, name="cat2l0or1tau_SR_OS", id=1014, selection="cat_2l0or1tau_SR_OS", label=r"$2\ell\  \leq 1\,\tau_{h}$ SR, OS")  # noqa: E501
+    _add_category(config, name="cat2l0or1tau_SB_SS", id=1015, selection="cat_2l0or1tau_SB_SS", label=r"$2\ell\  \leq 1\,\tau_{h}$ SB, SS")  # noqa: E501
+    _add_category(config, name="cat2l0or1tau_SB_OS", id=1016, selection="cat_2l0or1tau_SB_OS", label=r"$2\ell\  \leq 1\,\tau_{h}$ SB, OS")  # noqa: E501
     # 3l/4l non inclusive channels ( no taus)
     _add_category(config, name="c3e", id=14, selection="cat_3e", label=config.channels.n.c3e.label)
     _add_category(config, name="c2emu", id=15, selection="cat_2emu", label=config.channels.n.c2emu.label)
@@ -66,12 +65,12 @@ def add_categories(config: od.Config) -> None:
     _add_category(config, name="cmu3tau", id=31, selection="cat_mu3tau", label=config.channels.n.cmu3tau.label)
     _add_category(config, name="c4tau", id=32, selection="cat_4tau", label=config.channels.n.c4tau.label)
     # 2-leptons 0 or 1 taus channels
-    _add_category(config, name="c2e0or1tau", id=33, selection="cat_c2e0or1tau", label=config.channels.n.c2e0or1tau.label)
-    _add_category(config, name="cemu0or1tau", id=34, selection="cat_cemu0or1tau", label=config.channels.n.cemu0or1tau.label)
-    _add_category(config, name="c2mu0or1tau", id=35, selection="cat_c2mu0or1tau", label=config.channels.n.c2mu0or1tau.label)
+    _add_category(config, name="c2e0or1tau", id=33, selection="cat_c2e0or1tau", label=config.channels.n.c2e0or1tau.label)  # noqa: E501
+    _add_category(config, name="cemu0or1tau", id=34, selection="cat_cemu0or1tau", label=config.channels.n.cemu0or1tau.label)  # noqa: E501
+    _add_category(config, name="c2mu0or1tau", id=35, selection="cat_c2mu0or1tau", label=config.channels.n.c2mu0or1tau.label)  # noqa: E501
     # Loose category for BDT trainning + tight + trigmatch
     _add_category(config, name="ceormu", id=10000, selection="cat_e_or_mu", label=r"e or $\mu$", tags={"ceormu"})
-    _add_category(config, name="ceormu_bveto", id=15000, selection="cat_e_or_mu_bveto", label=r"e or $\mu$ bveto on", tags={"ceormu_bveto"})
+    _add_category(config, name="ceormu_bveto", id=15000, selection="cat_e_or_mu_bveto", label=r"e or $\mu$ bveto on", tags={"ceormu_bveto"})  # noqa: E501
     # bveto
     _add_category(config, name="bveto_on", id=30001, selection="cat_bveto_on", label="bveto on")
     _add_category(config, name="bveto_off", id=30002, selection="cat_bveto_off", label="bveto off")
@@ -88,9 +87,9 @@ def add_categories(config: od.Config) -> None:
     _add_category(config, name="tight", id=10001, selection="cat_tight", label="tight", tags={"tight"})
     _add_category(config, name="nontight", id=10002, selection="cat_nontight", label="fakeable", tags={"nontight"})
     # trigmatch
-    _add_category(config, name="trigmatch", id=10003, 
+    _add_category(config, name="trigmatch", id=10003,
         selection="cat_trigmatch", label="trigger matched", tags={"trigmatch"})
-    _add_category(config, name="nontrigmatch", id=10004, 
+    _add_category(config, name="nontrigmatch", id=10004,
         selection="cat_nontrigmatch", label="trigger unmatched", tags={"nontrigmatch"})
     # qcd regions
     _add_category(config, name="os", id=10, selection="cat_os", label="OS", tags={"os"})
@@ -106,7 +105,6 @@ def add_categories(config: od.Config) -> None:
     _add_category(config, name="res2b", id=301, selection="cat_res2b", label="res2b")
     _add_category(config, name="boosted", id=310, selection="cat_boosted", label="boosted")
 
-
     def name_fn(categories: dict[str, od.Category]) -> str:
         return "__".join(cat.name for cat in categories.values() if cat)
 
@@ -120,7 +118,7 @@ def add_categories(config: od.Config) -> None:
             })
         return {
             # NOTE: for this to be deterministic, the order of the categories must no change!
-            "id": "+", # just increment the category id
+            "id": "+",  # just increment the category id
             "tags": set.union(*[cat.tags for cat in categories.values() if cat]),
             "aux": aux,
             "label": ", ".join([
@@ -129,7 +127,7 @@ def add_categories(config: od.Config) -> None:
                 # if cat.name != "os"  # os is the default
             ]) or None,
         }
-    
+
     def skip_fn_ctrl(categories: dict[str, od.Category]) -> bool:
         if "channel" not in categories or "kin" not in categories:
             return False
@@ -142,7 +140,9 @@ def add_categories(config: od.Config) -> None:
         if kin_cat.name == "tt" and ch_cat.name in ("ee", "mumu"):
             return True
         return False
-    
+
+    """
+    from columnflow.config_util import CategoryGroup, create_category_combinations
     # main analysis categories
     main_categories = {
         # channels first
@@ -181,23 +181,23 @@ def add_categories(config: od.Config) -> None:
         "trig": CategoryGroup(["trigmatch_bdt", "nontrigmatch_bdt"], is_complete=True, has_overlap=False),
         "vetobtag": CategoryGroup(["bveto_on", "bveto_off"], is_complete=True, has_overlap=False),
     }
-    
-   # for cnm, cdict in {
-   #     'main': main_categories, 
-   #     'control': control_categories,               
-   #     'sideband': sig_sideband_categories, 
-   #     'bdt': bdt_categories
-   #     }.items():
-   #     
-   #     add_qcd_group = False
-   #     if cnm == 'main': 
-   #         add_qcd_group=True
-   #     
-   #     create_category_combinations(
-   #         config = config,
-   #         categories = cdict,
-   #         name_fn = name_fn,
-   #         kwargs_fn = functools.partial(kwargs_fn, add_qcd_group=add_qcd_group),
-   #         skip_fn = skip_fn_ctrl
-   #     )
 
+    for cnm, cdict in {
+        'main': main_categories,
+        'control': control_categories,
+        'sideband': sig_sideband_categories,
+        'bdt': bdt_categories
+        }.items():
+
+        add_qcd_group = False
+        if cnm == 'main':
+            add_qcd_group=True
+
+        create_category_combinations(
+            config = config,
+            categories = cdict,
+            name_fn = name_fn,
+            kwargs_fn = functools.partial(kwargs_fn, add_qcd_group=add_qcd_group),
+            skip_fn = skip_fn_ctrl
+        )
+   """
