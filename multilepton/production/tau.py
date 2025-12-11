@@ -102,11 +102,11 @@ def tau_weights(self: Producer, events: ak.Array, **kwargs) -> ak.Array:
         raise NotImplementedError
 
     mu_args = lambda mask, wp, syst: (abseta[mask], match[mask], wp, syst)
-    
+
     # genuine taus
     tau_mask = flat_np_view(dm_mask & (events.Tau.genPartFlav == 5), axis=1)
     sf_nom[tau_mask] = self.id_vs_jet_corrector(*tau_args(tau_mask, "nom"))
-    
+
     # electrons faking taus
     e_mask = ((events.Tau.genPartFlav == 1) | (events.Tau.genPartFlav == 3))
     if self.config_inst.campaign.x.run == 3:
@@ -135,17 +135,17 @@ def tau_weights(self: Producer, events: ak.Array, **kwargs) -> ak.Array:
         sf_tau_dm1 = sf_nom.copy()
         sf_tau_dm10 = sf_nom.copy()
         sf_tau_dm11 = sf_nom.copy()
-        
+
         tau_dm0_mask = tau_mask & (dm == 0)
         tau_dm1_mask = tau_mask & (dm == 1)
         tau_dm10_mask = tau_mask & (dm == 10)
         tau_dm11_mask = tau_mask & (dm == 11)
-        
+
         sf_tau_dm0[tau_dm0_mask] = self.id_vs_jet_corrector(*tau_args(tau_dm0_mask, direction))
         sf_tau_dm1[tau_dm1_mask] = self.id_vs_jet_corrector(*tau_args(tau_dm1_mask, direction))
         sf_tau_dm10[tau_dm10_mask] = self.id_vs_jet_corrector(*tau_args(tau_dm10_mask, direction))
         sf_tau_dm11[tau_dm11_mask] = self.id_vs_jet_corrector(*tau_args(tau_dm11_mask, direction))
-        
+
         events = set_ak_column_f32(events, f"tau_weight_jet_dm0_{direction}", reduce_mul(sf_tau_dm0))
         events = set_ak_column_f32(events, f"tau_weight_jet_dm1_{direction}", reduce_mul(sf_tau_dm1))
         events = set_ak_column_f32(events, f"tau_weight_jet_dm10_{direction}", reduce_mul(sf_tau_dm10))
@@ -207,7 +207,6 @@ def tau_weights_setup(
     tau_file = self.get_tau_file(reqs["external_files"].files)
     correction_set = load_correction_set(tau_file)
     tagger_name = self.get_tau_tagger()
-    
     self.id_vs_jet_corrector = correction_set[f"{tagger_name}VSjet"]
     self.id_vs_e_corrector = correction_set[f"{tagger_name}VSe"]
     self.id_vs_mu_corrector = correction_set[f"{tagger_name}VSmu"]

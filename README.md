@@ -29,14 +29,14 @@ For further questions please, contact t\*\*\*\*.l\*\*\*\*@no-spam-cern.ch.
 
 ```shell
 # 1. clone the project
-git clone --recursive git@github.com:HEP-KBFI/hhmultilepton.git
-cd hhmultilepton
+git clone --recursive git@github.com:HEP-KBFI/hhmultilepton2.git
+cd hhmultilepton2
 
 # 2. get a voms token
 voms-proxy-init -voms cms -rfc -valid 196:00
 
 # 3. copy the provided template to a new file (you can choose any <setup_name>):
-cp .setups/template.sh .setups/mydev.sh
+cp .setups/template.sh .setups/<setup_name>.sh
 
 # 4. open .setups/mydev.sh in your editor and adjust any environment variables or paths as needed for your local setup.
 # then source the main setup script with your custom setup name:

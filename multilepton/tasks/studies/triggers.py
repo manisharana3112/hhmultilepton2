@@ -43,9 +43,8 @@ class PrintTriggersInFile(MultileptonTriggerTask, DatasetTask, law.tasks.RunOnce
         > law run multilepton.PrintTriggersInFile --dataset hh_ggf_bbtautau_madgraph
     """
     # upstream requirements
-    reqs = Requirements(
-        GetDatasetLFNs=GetDatasetLFNs,
-    )
+    reqs = Requirements(GetDatasetLFNs=GetDatasetLFNs)
+
     def requires(self):
         return self.reqs.GetDatasetLFNs.req(self)
 
@@ -104,7 +103,6 @@ class PrintExistingConfigTriggers(MultileptonTriggerTask, DatasetsProcessesMixin
         from tabulate import tabulate
 
         fmt = law.util.escape_markdown if self.escape_markdown else (lambda s: s)
-        # table data
         header = ["HLT path"]
         rows = [[fmt(trigger.hlt_field)] for trigger in self.config_inst.x.triggers]
         lfn_indices = list(set(self.lfn_indices))

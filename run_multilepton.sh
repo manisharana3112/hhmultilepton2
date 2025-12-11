@@ -1,17 +1,23 @@
 law run cf.PlotVariables1D \
-    --version testnanov15_2024__ver4 \
+    --version checkbug \
+    --datasets zz_pythia \
     --producers default \
     --variables nmu \
     --categories ceormu \
-    --datasets data_mu_e \
     --view-cmd imgcat \
-    --configs 24_v15_central \
-    --parallel-jobs 200 \
+    --configs 22preEE_v14_private \
     $1 
-
+    
     #--version prod1 \
+    #--datasets z_vbf_zll_m50toinf_madgraph \
+    #--configs 24_v15_central \
+    #--datasets dy_mumu_m800to1500_powheg \
     #--datasets all_backgrounds \
     #--workflow slurm \
+    #--parallel-jobs 300 \
+
+    #--version testnanov15_2024__ver4 \
+    #--datasets data_mu_e \
     
     # FIXME to test out the functionality of these
     #--limit-dataset-files 1 \

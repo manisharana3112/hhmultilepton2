@@ -129,7 +129,7 @@ def electron_selection(
     else:
         # nano <v14
         promptMVA = events.Electron.mvaTTH
-    
+
     # default electron mask
     tight_mask = None
     control_mask = None
@@ -706,8 +706,9 @@ def lepton_selection(
         mu_mask, mu_ctrl, mu_veto = self[muon_selection](events, trigger, **kwargs)
         e_mask_bdt, e_ctrl_bdt, e_veto_bdt = self[electron_selection](events, trigger, ch_key="eormu", **kwargs)
         mu_mask_bdt, mu_ctrl_bdt, mu_veto_bdt = self[muon_selection](events, trigger, ch_key="eormu", **kwargs)
-        tau_mask, tau_trigger_specific_mask, tau_iso_mask, noid_tau_mask = self[tau_selection](events, trigger, e_mask, mu_mask, **kwargs)
-        
+        tau_mask, tau_trigger_specific_mask, tau_iso_mask, noid_tau_mask = self[tau_selection](events,
+                trigger, e_mask, mu_mask, **kwargs)
+
         # early study tagger independendt taus
         sel_noid_tau_mask = noid_tau_mask
         if trigger.has_tag({"single_e"}):
@@ -759,9 +760,10 @@ def lepton_selection(
     cross_e_tau_only = tau_trig_any & ~e_trig_any & ~mu_trig_any
     single_e_tids = [tid for tid, tags in _tid_tags.items() if "single_e" in tags]
     single_mu_tids = [tid for tid, tags in _tid_tags.items() if "single_mu" in tags]
-    cross_tau_tau_any = [tid for tid, tags in _tid_tags.items() if {"cross_tau_tau", "cross_tau_tau_jet", "cross_tau_tau_vbf"} & tags]
     cross_e_tau = [tid for tid, tags in _tid_tags.items() if "cross_e_tau" in tags]
     cross_mu_tau = [tid for tid, tags in _tid_tags.items() if "cross_mu_tau" in tags]
+    cross_tau_tau_any = [tid for tid, tags in _tid_tags.items() if {"cross_tau_tau",
+        "cross_tau_tau_jet", "cross_tau_tau_vbf"} & tags]
 
     _trig_cache.update({
         # set of events that have triggered at least one single_e trigger

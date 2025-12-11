@@ -193,4 +193,3 @@ def default_init(self: Calibrator, **kwargs) -> None:
     }
     self.uses |= derived_calibrators
     self.produces |= derived_calibrators
-

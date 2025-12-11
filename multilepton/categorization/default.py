@@ -18,6 +18,8 @@ def cat_all(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak
 #
 # di-lepton channels
 #
+
+
 @categorizer(uses={"channel_id"})
 def cat_etau(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     return events, events.channel_id == self.config_inst.channels.n.cetau.id
@@ -417,6 +419,7 @@ def cat_2l0or1tau_SB_OS(self: Categorizer, events: ak.Array, **kwargs) -> tuple[
     OS = events.leptons_os == 1
     return events, (catmask & bveto & SB & OS)
 
+
 # bveto
 @categorizer(uses={"Jet.btagPNetB"})
 def cat_bveto_on(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
@@ -426,6 +429,7 @@ def cat_bveto_on(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Arra
     tagged_medium = events.Jet.btagPNetB > wp_medium
     veto = (ak.sum(tagged_loose, axis=1) < 2) & (ak.sum(tagged_medium, axis=1) < 1)
     return events, veto
+
 
 @categorizer(uses={"Jet.btagPNetB"})
 def cat_bveto_off(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
@@ -567,6 +571,7 @@ def cat_boosted(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array
         ~self[cat_res2b](events, **kwargs)[1]
     )
     return events, mask
+
 
 @categorizer(uses={"{Electron,Muon,Tau}.{pt,eta,phi,mass}"})
 def cat_dy(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:

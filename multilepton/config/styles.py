@@ -10,12 +10,11 @@ import law
 import order as od
 
 from copy import deepcopy
-from collections import defaultdict, ChainMap
-from columnflow.util import DotDict, try_int
+from collections import defaultdict
+from columnflow.util import DotMap, try_int
 
 
 logger = law.logger.get_logger(__name__)
-
 
 
 def resolve_inheritance(styles: dict) -> dict:
@@ -108,7 +107,7 @@ def apply_process_styles(config, process_key, process_data, group=None):
                     kl = parts.get("kl", "1")
                     kappa_label = create_kappa_label(**{"2V": k2v, r"\lambda": kl, "V": kv})
                     p.label = rf"$HH_{{vbf}} \rightarrow {decay}$ __SCALE____SHORT____BREAK__({kappa_label})"
-    return 
+    return
 
 
 def stylize_processes(config: od.Config, datasets_cfg: DotMap) -> None:

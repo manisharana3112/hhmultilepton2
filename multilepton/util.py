@@ -110,12 +110,10 @@ def IF_DATASET_HAS_TAG(*args, negate: bool = False, **kwargs) -> ArrayFunction.D
         func: ArrayFunction,
     ) -> Any | set[Any]:
         return self.get() if func.dataset_inst.has_tag(*args, **kwargs) is not negate else None
-
     return deferred
 
 
 IF_DATASET_NOT_HAS_TAG = functools.partial(IF_DATASET_HAS_TAG, negate=True)
-
 IF_DATASET_HAS_LHE_WEIGHTS = IF_DATASET_NOT_HAS_TAG("no_lhe_weights")
 IF_DATASET_HAS_TOP = IF_DATASET_HAS_TAG("has_top")
 IF_DATASET_HAS_HIGGS = IF_DATASET_HAS_TAG("has_higgs")
@@ -179,7 +177,6 @@ def with_type(type_name: str, data: dict[str, ak.Array], behavior: dict | None =
     """
     Attaches a named behavior *type_name* to the structured *data* and returns an array with that behavior. The source
     behavior is extracted from the *behavior* mapping, which is extracted from the first data column if not provided.
-
     :param type_name: The name of the type to attach.
     :param data: The structured data to attach the behavior to.
     :param behavior: The behavior to attach, defaults to the first data column's behavior.
@@ -191,10 +188,10 @@ def with_type(type_name: str, data: dict[str, ak.Array], behavior: dict | None =
     return ak.Array(data, with_name=type_name, behavior=behavior)
 
 
-def create_lvector_exyz(e: ak.Array, px: ak.Array, py: ak.Array, pz: ak.Array, behavior: dict | None = None) -> ak.Array:
+def create_lvector_exyz(e: ak.Array, px: ak.Array, py: ak.Array, pz: ak.Array,
+        behavior: dict | None = None) -> ak.Array:
     """
     Creates a Lorentz vector with the given energy and momentum components.
-
     :param e: Energy component.
     :param px: x-component of momentum.
     :param py: y-component of momentum.
@@ -213,7 +210,6 @@ def create_lvector_exyz(e: ak.Array, px: ak.Array, py: ak.Array, pz: ak.Array, b
 def create_lvector_xyz(px: ak.Array, py: ak.Array, pz: ak.Array, behavior: dict | None = None) -> ak.Array:
     """
     Creates a Lorentz vector with the given momentum components and zero mass.
-
     :param px: x-component of momentum.
     :param py: y-component of momentum.
     :param pz: z-component of momentum.
@@ -223,29 +219,21 @@ def create_lvector_xyz(px: ak.Array, py: ak.Array, pz: ak.Array, behavior: dict 
     return create_lvector_exyz(p, px, py, pz, behavior=behavior)
 
 
-_uppercase_wps = {
-    "vvvvloose": "VVVVLoose",
-    "vvvloose": "VVVLoose",
-    "vvloose": "VVLoose",
-    "vloose": "VLoose",
-    "loose": "Loose",
-    "medium": "Medium",
-    "tight": "Tight",
-    "vtight": "VTight",
-    "vvtight": "VVTight",
-    "vvvtight": "VVVTight",
-    "vvvvtight": "VVVVTight",
-}
-
-
 def uppercase_wp(wp: str) -> str:
     """
-    Converts a working point string to uppercase format.
-
-    :param wp: Working point string.
-    :return: Uppercase working point string.
+    Converts a working point string to uppercase ColumnFlow format.
+    Supported patterns:
+      - loose, vloose, vvloose, ...
+      - tight, vtight, vvtight, ...
+      - medium (special case)
     """
     wp = wp.lower()
-    if wp not in _uppercase_wps:
+    # special cases that don't follow the v^n pattern
+    if wp == "medium":
+        return "Medium"
+    # count leading 'v'
+    n_v = len(wp) - len(wp.lstrip("v"))
+    base = wp[n_v:]  # remove leading v's
+    if base not in {"loose", "tight"}:
         raise ValueError(f"unknown working point for uppercase conversion: {wp}")
-    return _uppercase_wps[wp]
+    return "V" * n_v + base.capitalize()

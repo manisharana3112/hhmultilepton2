@@ -98,6 +98,6 @@ def jet_trigger_efficiencies_setup(
 
     # create the trigger and id correctors
     correction_set = load_correction_set(self.get_jet_file(bundle.files))
-    #print("Available keys:", list(correction_set.keys()))
+    # print("Available keys:", list(correction_set.keys()))
     self.jet_trig_corrector = correction_set[self.get_jet_corrector()]
-    #assert self.jet_trig_corrector.version in [0, 1]
+    # assert self.jet_trig_corrector.version in [0, 1]

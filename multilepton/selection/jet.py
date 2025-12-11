@@ -39,8 +39,6 @@ ak = maybe_import("awkward")
         "Jet.hhbtag", "matched_trigger_ids",
     },
 )
-
-
 def jet_selection(
     self: Selector,
     events: ak.Array,
@@ -96,11 +94,9 @@ def jet_selection(
     default_mask_noclean = (
         (events.Jet.pt > 5) &
         (abs(events.Jet.eta) < 2.5)
-     )
- 
-    #
+    )
+
     # FIXME need to go hhb-jet identification
-    #
     # events = self[hhbtag](events, default_mask, lepton_results.x.lepton_pair, **kwargs)
     # hhbtag_scores = events.hhbtag_score
     # just set hhbtag to zero for now, later remove
@@ -138,7 +134,7 @@ def jet_selection(
             false_mask,
         ), axis=1)
     )
-    
+
     # create mask for tautau events that matched taus in vbf trigger
     ttv_mask = (
         (events.channel_id == ch_tautau.id) &
@@ -181,7 +177,7 @@ def jet_selection(
                     matching_mask |
                     trigger_matching_mask
                 )
-                
+
                 # update trigger matching mask with constraints on the jets
                 trigger_matching_mask = (
                     trigger_matching_mask &
@@ -283,7 +279,7 @@ def jet_selection(
         (events.FatJet.subJetIdx1 >= 0) &
         (events.FatJet.subJetIdx2 >= 0)
     )
-    
+
     # ak.all(events.FatJet.metric_table(lepton_results.x.leading_taus) > 0.8, axis=2) &
     # store fatjet and subjet indices
     fatjet_indices = ak.local_index(events.FatJet.pt)[fatjet_mask]
@@ -349,7 +345,6 @@ def jet_selection(
         # update the "ttv only" mask
         cross_vbf_masks = [events.matched_trigger_ids == tid for tid in self.trigger_ids_ttv]
         cross_vbf_mask = ak.all(reduce(or_, cross_vbf_masks), axis=1)
-        
         # remove all events that fired only vbf trigger but were not matched or
         # that fired vbf and tautaujet triggers and matched the taus but not the jets
         ttv_fired_v_not_matched = (
@@ -414,30 +409,31 @@ def jet_selection(
     jet_indices_no_clean = sorted_indices_from_mask(default_mask_noclean, events.Jet.pt, ascending=False)
 
     # get indices of the two hhbjets
-    hhbjet_indices = sorted_indices_from_mask(hhbjet_mask, hhbtag_scores, ascending=False)
+    # hhbjet_indices = sorted_indices_from_mask(hhbjet_mask, hhbtag_scores, ascending=False)
 
     # keep indices of default jets that are explicitly not selected as hhbjets for easier handling
-    non_hhbjet_indices = sorted_indices_from_mask(
-        default_mask & (~hhbjet_mask),
-        events.Jet.pt,
-        ascending=False,
-    )
+    # non_hhbjet_indices = sorted_indices_from_mask(
+    #    default_mask & (~hhbjet_mask),
+    #    events.Jet.pt,
+    #    ascending=False,
+    # )
 
     # final event selection (only looking at number of default jets for now)
     # perform a cut on ≥1 jet and all other cuts first, and then cut on ≥2, resulting in an
     # additional, _skippable_ step
     jet_sel = (
-        (ak.sum(default_mask, axis=1) >= 0) & #dont require jets at the moment, will be added on per channel basis
+        # dont require jets at the moment, will be added on per channel basis
+        (ak.sum(default_mask, axis=1) >= 0) &
         match_at_least_one_trigger
         # add additional cuts here in the future
     )
-    #jet_sel2 = jet_sel & (ak.sum(default_mask, axis=1) >= 2)
+    # jet_sel2 = jet_sel & (ak.sum(default_mask, axis=1) >= 2)
 
     # some final type conversions
     jet_indices = ak.values_astype(ak.fill_none(jet_indices, 0), np.int32)
     jet_indices_no_clean = ak.values_astype(ak.fill_none(jet_indices_no_clean, 0), np.int32)
-    #hhbjet_indices = ak.values_astype(hhbjet_indices, np.int32)
-    #non_hhbjet_indices = ak.values_astype(ak.fill_none(non_hhbjet_indices, 0), np.int32)
+    # hhbjet_indices = ak.values_astype(hhbjet_indices, np.int32)
+    # non_hhbjet_indices = ak.values_astype(ak.fill_none(non_hhbjet_indices, 0), np.int32)
     fatjet_indices = ak.values_astype(fatjet_indices, np.int32)
     vbfjet_indices = ak.values_astype(ak.fill_none(vbfjet_indices, 0), np.int32)
 
@@ -448,7 +444,7 @@ def jet_selection(
     result = SelectionResult(
         steps={
             "jet": jet_sel,
-            #"jet2": jet_sel2,
+            # "jet2": jet_sel2,
             # the btag weight normalization requires a selection with everything but the bjet
             # selection, so add this step here
             # note: there is currently no b-tag discriminant cut at this point, so skip it
@@ -459,8 +455,8 @@ def jet_selection(
             "Jet": {
                 "Jet": jet_indices,
                 "NonCleanedJet": jet_indices_no_clean,
-                #"HHBJet": hhbjet_indices,
-                #"NonHHBJet": non_hhbjet_indices,
+                # "HHBJet": hhbjet_indices,
+                # "NonHHBJet": non_hhbjet_indices,
                 "VBFJet": vbfjet_indices,
             },
             "FatJet": {

@@ -134,7 +134,8 @@ setup_multilepton() {
     export CF_CONDA_BASE="${CF_CONDA_BASE:-${CF_SOFTWARE_BASE}/conda}"
     export CF_VENV_BASE="${CF_VENV_BASE:-${CF_SOFTWARE_BASE}/venvs}"
     export CF_CMSSW_BASE="${CF_CMSSW_BASE:-${CF_SOFTWARE_BASE}/cmssw}"
-
+    export CF_MAMBA_BASE="$CF_CONDA_BASE/bin/micromamba"
+ 
     #
     # common variables
     #
@@ -160,15 +161,17 @@ setup_multilepton() {
     #
     # additional common cf setup steps
     #
-    if ! (micromamba env export | grep -q correctionlib); then
-    echo correctionlib misisng, installing...
-    micromamba install \
-        correctionlib==2.7.0 \
-        || return "$?"
-    micromamba clean --yes --all
-    fi 
-    cf_setup_post_install || return "$?"
-
+    if ! ${CF_SKIP_SETUP}; then
+        if ! ($CF_MAMBA_BASE env export | grep -q correctionlib); then
+        echo correctionlib misisng, installing...
+        $CF_MAMBA_BASE install \
+            correctionlib==2.7.0 \
+            || return "$?"
+        $CF_MAMBA_BASE clean --yes --all
+        fi
+        cf_setup_post_install || return "$?"
+    fi
+    
     # update the law config file to switch from mirrored to bare wlcg targets
     # as local mounts are typically not available remotely
     if ${CF_REMOTE_ENV}; then

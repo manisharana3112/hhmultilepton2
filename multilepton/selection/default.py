@@ -80,14 +80,17 @@ def get_bad_events(self: Selector, events: ak.Array) -> ak.Array:
 
 @selector(
     uses={
-        json_filter, met_filters, IF_RUN_3_NOT_NANO_V15(jet_veto_map), trigger_selection, lepton_selection, jet_selection,
-        mc_weight, pu_weight, ps_weights, btag_weights_deepjet, IF_RUN_3(btag_weights_pnet), process_ids,
+        process_ids, json_filter, met_filters,
+        trigger_selection, lepton_selection, jet_selection,
+        mc_weight, pu_weight, ps_weights, btag_weights_deepjet,
         cutflow_features, attach_coffea_behavior, patch_ecalBadCalibFilter,
+        IF_RUN_3_NOT_NANO_V15(jet_veto_map), IF_RUN_3(btag_weights_pnet),
         IF_DATASET_HAS_LHE_WEIGHTS(pdf_weights, murmuf_weights),
     },
     produces={
-        trigger_selection, lepton_selection, jet_selection, mc_weight, pu_weight, ps_weights, btag_weights_deepjet,
         process_ids, cutflow_features, IF_RUN_3(btag_weights_pnet),
+        trigger_selection, lepton_selection, jet_selection,
+        mc_weight, pu_weight, ps_weights, btag_weights_deepjet,
         IF_DATASET_HAS_LHE_WEIGHTS(pdf_weights, murmuf_weights),
     },
     exposed=True,
@@ -125,7 +128,7 @@ def default(
             events.patchedEcalBadCalibFilter
         )
     results += met_filter_results
-    
+
     # jet veto map
     if self.has_dep(jet_veto_map):
         events, veto_result = self[jet_veto_map](events, **kwargs)
@@ -161,7 +164,7 @@ def default(
 
         # parton shower weights
         events = self[ps_weights](events, invalid_weights_action="ignore_one", **kwargs)
-        
+
         # pileup weights
         events = self[pu_weight](events, **kwargs)
 

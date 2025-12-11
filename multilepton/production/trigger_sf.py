@@ -435,7 +435,7 @@ def tautau_trigger_weight(
     ttj_triggered = ((events.channel_id == channel.id) & ttj_trigger_passed)
     # ttv_triggered = ((events.channel_id == channel.id) & ttv_trigger_passed)  # vbf treatment left out from here on
 
-    sorted_jet_indices = ak.argsort(events.Jet.pt, axis=1, ascending=False)
+    # sorted_jet_indices = ak.argsort(events.Jet.pt, axis=1, ascending=False)
     leading_Jet_mask = (ak.zeros_like(events.Jet.pt, dtype=int) == ak.local_index(events.Jet.pt)[sorted_hhbjet_indices])  # noqa
     jet_mask = (ttj_triggered & leading_Jet_mask)
     # create jet trigger efficiencies

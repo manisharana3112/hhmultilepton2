@@ -101,8 +101,7 @@ class TestModel(MLModel):
     ) -> ak.Array:
         # fake evaluation
         events = set_ak_column(events, f"{self.cls_name}.kl", 0.5, value_type=np.float32)
-
         return events
 
-# usable derivations
+
 test_model = TestModel.derive("test_model", cls_dict={"folds": 2})

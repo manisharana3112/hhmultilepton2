@@ -23,7 +23,7 @@ from columnflow.tasks.external import ExternalFile as Ext
 from columnflow.util import DotDict, dev_sandbox, load_correction_set
 from columnflow.columnar_util import ColumnCollection, skip_column
 from columnflow.config_util import get_root_processes_from_campaign, get_shifts_from_sources
-from columnflow.config_util import add_shift_aliases, verify_config_processes 
+from columnflow.config_util import add_shift_aliases, verify_config_processes
 from columnflow.production.cms.top_pt_weight import TopPtWeightFromTheoryConfig, TopPtWeightFromDataConfig
 from columnflow.production.cms.dy import DrellYanConfig
 from columnflow.production.cms.btag import BTagSFConfig
@@ -44,7 +44,6 @@ from multilepton.config.triggers import add_triggers
 logger = law.logger.get_logger(__name__)
 
 
-
 def load_datasets_config(yaml_path):
     """Load dataset information from the YAML file."""
     with open(yaml_path, "r") as f:
@@ -54,31 +53,30 @@ def load_datasets_config(yaml_path):
 
 class AnalysisConfig:
     """Helper class to manage analysis configuration from YAML."""
-    
     def __init__(self, data):
         self.data = DotDict.wrap(data)
-    
+
     def get_era_key(self, campaign):
         """Get era key for b-tag WPs, luminosity, etc."""
         year = campaign.x.year
         postfix = campaign.x.postfix
-        
-        if year in [2016, 2017, 2018]: # Run2
+
+        if year in [2016, 2017, 2018]:  # Run2
             return f"{year}{postfix}" if year == 2016 and postfix == "APV" else str(year)
         else:  # Run 3
             era_map = {
                 (2022, ""): "2022",
-                (2022, "EE"): "2022EE", 
+                (2022, "EE"): "2022EE",
                 (2023, ""): "2023",
                 (2023, "BPix"): "2023BPix",
                 (2024, ""): "2024",
             }
             return era_map.get((year, postfix), str(year))
-    
+
     def get_era(self, campaign):
         year = campaign.x.year
         if year == 2016:
-            era= "preVFP" if campaign.has_tag("preVFP") else "postVFP"
+            era = "preVFP" if campaign.has_tag("preVFP") else "postVFP"
         elif year == 2022:
             era = "preEE" if campaign.has_tag("preEE") else "postEE"
         elif year == 2023:
@@ -92,10 +90,10 @@ class AnalysisConfig:
         year = campaign.x.year
         lumis = self.data.luminosity.get(str(year)).get("luminosity")
         if isinstance(lumis, dict):
-            return lumis.get(get_era(self, campaign))
+            return lumis.get(analysis_cfg.get_era(campaign))
         else:
             return lumis
-   
+
     def get_dataset_list(self, process_type="all"):
         """
         Return a flattened list of all 'cmsdb' entries under 'signal' and/or 'background'.
@@ -107,7 +105,7 @@ class AnalysisConfig:
         datasets = self.data.get("datasets", {})
         dataset_names = []
         categories = ["signal", "background"] if process_type == "all" else [process_type]
-    
+
         for category in categories:
             category_data = datasets.get(category, {})
             if not isinstance(category_data, dict):
@@ -137,8 +135,8 @@ analysis_cfg = AnalysisConfig(analysis_data)
 
 def pogEraFormat(era):
     """Format era for POG file paths."""
-    if any(x in era for x in ['2022', '2023', '2024']):
-        return era[:4] + '_Summer' + era.replace('20', '')
+    if any(x in era for x in ["2022", "2023", "2024"]):
+        return era[:4] + "_Summer" + era.replace("20", "")
     else:
         return era.replace("UL", "") + "_UL"
 
@@ -154,12 +152,13 @@ def nested_dict():
     return defaultdict(nested_dict)
 
 
-#https://btv-wiki.docs.cern.ch/ScaleFactors
+# https://btv-wiki.docs.cern.ch/ScaleFactors
 def bTagWorkingPoints(year, run, campaign):
     getfromyear = year
-    if year == 2024: getfromyear = 2023 # still missing FIXME once they are updated by BTV-POG
+    if year == 2024:
+        getfromyear = 2023  # still missing FIXME once they are updated by BTV-POG
     fileName = law.LocalFileTarget(localizePOGSF(getfromyear, "BTV", "btagging.json.gz"))
-    logger.info(f'... getting working points and discr cuts from : {fileName}')
+    logger.info(f"Getting btagging working points and discriminator cuts from : {fileName}")
     ceval = load_correction_set(fileName)
     btagging = nested_dict()
     if run == 2:
@@ -172,25 +171,25 @@ def bTagWorkingPoints(year, run, campaign):
         raise ValueError(f"Unsupported run: {run}")
 
     era = f"{year}{campaign.x.postfix}"
-    mlwps = {'L': 'loose',
-             'M': 'medium',
-             'T': 'tight',
-             'XT': 'xtight',
-             'XXT': 'xxtight'}
+    mlwps = {"L": "loose",
+             "M": "medium",
+             "T": "tight",
+             "XT": "xtight",
+             "XXT": "xxtight"}
     if era not in "".join(valid_eras):
         raise ValueError(f"Era {era} not valid for run {run}")
 
     for tagger in taggers:
-        for wp in ['L', 'M', 'T', 'XT', 'XXT']:
+        for wp in ["L", "M", "T", "XT", "XXT"]:
             try:
-                btagging[tagger][mlwps[wp]]= ceval[f"{tagger.replace('MD', '')}_wp_values"].evaluate(wp)
+                btagging[tagger][mlwps[wp]] = ceval[f"{tagger.replace('MD', '')}_wp_values"].evaluate(wp)
             except Exception as e:
                 logger.warning(f"Failed to evaluate {tagger} {wp} for {era}: {e}")
     # Optionally convert defaultdicts to normal dicts for output
     return json.loads(json.dumps(btagging))
 
 
-def build_stitching_config(process_name, inclusive_dataset):
+def build_stitching_config(procs, process_name, inclusive_dataset):
     """Build complete stitching configuration for a process."""
     # Configuration for different jet multiplicities
     JET_BIN_CONFIG = {
@@ -223,11 +222,11 @@ def build_stitching_config(process_name, inclusive_dataset):
 
 def convert_dataset_to_process(dataset, campaign, all_processes_from_campaign):
     process = dataset
-    for production in ['_powheg', '_amcatnlo', '_pythia', '_madgraph']:
+    for production in ["_powheg", "_amcatnlo", "_pythia", "_madgraph"]:
         if production in dataset:
-            process = dataset.replace(production, '')
-            if process in ['st_schannel_t_lep_4f', 'st_schannel_tbar_lep_4f', 'www_4f', 'wwz_4f']:
-                process = process.replace('_4f','')
+            process = dataset.replace(production, "")
+            if process in ["st_schannel_t_lep_4f", "st_schannel_tbar_lep_4f", "www_4f", "wwz_4f"]:
+                process = process.replace("_4f", "")
     # Find matching process and return its id
     id = None
     for proc in all_processes_from_campaign:
@@ -246,34 +245,34 @@ def add_config(
     config_id: int | None = None,
     limit_dataset_files: int | None = None,
 ) -> od.Config:
-    
+
     # gather campaign data
     run = campaign.x.run
     year = campaign.x.year
-    
+
     # --- basic configuration validations ---
     if run not in {2, 3}:
         raise ValueError(f"Invalid run: {run}. Expected 2 or 3.")
-    
-    valid_years = {2016, 2017, 2018, 2022, 2023, 2024}# , 2025} not yet
+
+    valid_years = {2016, 2017, 2018, 2022, 2023, 2024}  # , 2025} not yet
     if year not in valid_years:
         raise ValueError(f"Invalid year: {year}. Must be one of {sorted(valid_years)}.")
-    
+
     # get all root processes
     all_processes_from_campaign = get_root_processes_from_campaign(campaign)
-    #for proc in list(set(all_processes_from_campaign)):
-    #    print( proc, proc.name , proc.id) 
-    
+    # for proc in list(set(all_processes_from_campaign)):
+    #    print( proc, proc.name , proc.id)
+
     # create a config by passing the campaign
     cfg = od.Config(
         name=config_name,
         id=config_id,
         campaign=campaign,
     )
-    
-    #=============================================
+
+    # =============================================
     # helpers
-    #=============================================
+    # =============================================
     def ConfigureLuminosity(cfg, campaign, year, analysis_data):
         year_data = analysis_data["years"].get(year)
         if not year_data:
@@ -289,9 +288,9 @@ def add_config(
         else:
             lumi_value = lumi_info
         lumi_unc_list = year_data.get("luminosity-uncertainties", [])
-        lumi_unc = {list(d.keys())[0]: list(d.values())[0]*1j for d in lumi_unc_list}
+        lumi_unc = {list(d.keys())[0]: list(d.values())[0] * 1j for d in lumi_unc_list}
         cfg.x.luminosity = Number(lumi_value, lumi_unc)
-        return cfg 
+        return cfg
 
     def ConfigureMuons(cfg, run, year, campaign):
         if run == 2:
@@ -299,36 +298,38 @@ def add_config(
         elif run == 3:
             cfg.x.muon_sf_names = MuonSFConfig(correction="NUM_TightPFIso_DEN_TightID")
             cfg.x.muon_trigger_sf_names = MuonSFConfig("NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight")
-            cfg.x.single_trigger_muon_data_effs_cfg = MuonSFConfig("NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight_DATAeff")
-            cfg.x.single_trigger_muon_mc_effs_cfg = MuonSFConfig("NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight_MCeff")
-            cfg.x.cross_trigger_muon_data_effs_cfg = MuonSFConfig("NUM_IsoMu20_DEN_CutBasedIdTight_and_PFIsoTight_DATAeff")
-            cfg.x.cross_trigger_muon_mc_effs_cfg = MuonSFConfig("NUM_IsoMu20_DEN_CutBasedIdTight_and_PFIsoTight_MCeff")
-        return cfg 
+            cfg.x.single_trigger_muon_data_effs_cfg = MuonSFConfig("NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight_DATAeff")  # noqa: E501
+            cfg.x.single_trigger_muon_mc_effs_cfg = MuonSFConfig("NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight_MCeff")  # noqa: E501
+            cfg.x.cross_trigger_muon_data_effs_cfg = MuonSFConfig("NUM_IsoMu20_DEN_CutBasedIdTight_and_PFIsoTight_DATAeff")  # noqa: E501
+            cfg.x.cross_trigger_muon_mc_effs_cfg = MuonSFConfig("NUM_IsoMu20_DEN_CutBasedIdTight_and_PFIsoTight_MCeff")  # noqa: E501
+        return cfg
 
-    def ConfigureElectrons(cfg, run, year, campaign):
+    def ConfigureElectrons(cfg, run, year, campaign, scale_compound=False, smear_syst_compound=False):
         """ Run 2: https://twiki.cern.ch/twiki/bin/view/CMS/EgammaULTagAndProbe
             Run 3: https://twiki.cern.ch/twiki/bin/view/CMS/EgammaRun3Recommendations
         """
         EGMcorrection = {
-                "2016APV": "preVFP",
-                "2016": "postVFP",
-                "2017": "",
-                "2018": "",
-                "2022EE": "Re-recoE+PromptFG", 
-                "2022": "Re-recoBCD",
-                "2023BPix": "PromptD",
-                "2023": "PromptC",
-                "2024": "Prompt",
-                }
+            "2016APV": "preVFP",
+            "2016": "postVFP",
+            "2017": "",
+            "2018": "",
+            "2022EE": "Re-recoE+PromptFG",
+            "2022": "Re-recoBCD",
+            "2023BPix": "PromptD",
+            "2023": "PromptC",
+            "2024": "Prompt",
+        }
         e_postfix = EGMcorrection.get(f"{year}{campaign.x.postfix}")
-        e_prefix = 'UL-' if run == 2 else ''
-        
+        e_prefix = "UL-" if run == 2 else ""
+        scalecorr = "Compound_Ele" if scale_compound else "ElePTsplit"
+        smearcorr = "Compound_Ele" if smear_syst_compound else "ElePTsplit"
+
         cfg.x.electron_sf_names = ElectronSFConfig(
             correction=f"{e_prefix}Electron-ID-SF",
             campaign=f"{year}{e_postfix}",
             working_point="wp80iso",
         )
-        
+
         # Define HLT paths for easier maintenance
         hlt_single, hlt_cross = "HLT_SF_Ele30_TightID", "HLT_SF_Ele24_TightID"
 
@@ -349,16 +350,16 @@ def add_config(
             e_tag = {"": "preEE", "EE": "postEE"}[campaign.x.postfix]
         elif year == 2023:
             e_tag = {"": "preBPIX", "BPix": "postBPIX"}[campaign.x.postfix]
-       
-        if run ==3:
+
+        if run == 3:
             # electron scale and smearing (eec and eer)
             cfg.x.ess = EGammaCorrectionConfig(
-                scale_correction_set=f"EGMScale_ElePTsplit_{year}",
-                scale_compound=False,
-                smear_syst_correction_set=f"EGMSmearAndSyst_ElePTsplit_{year}",
-                smear_syst_compound=False,
+                scale_correction_set=f"EGMScale_{scalecorr}_{year}{e_tag}",
+                scale_compound=scale_compound,
+                smear_syst_correction_set=f"EGMSmearAndSyst_{smearcorr}_{year}{e_tag}",
+                smear_syst_compound=smear_syst_compound,
                 systs=["scale_down", "scale_up", "smear_down", "smear_up"],
-            ) 
+            )
         return cfg
 
     def ConfigureTaus(cfg, run, campaign):
@@ -369,11 +370,11 @@ def add_config(
             2: "DeepTau2017v2p1",
             3: "DeepTau2018v2p5",
         }
-    
+
         cfg.x.tau_tagger = tau_taggers.get(run)
         corrector_kwargs = {"wp": "Medium", "wp_VSe": "VVLoose"} if run == 3 else {}
         cfg.x.tec = TECConfig(tagger=cfg.x.tau_tagger, corrector_kwargs=corrector_kwargs)
-    
+
         # --- Tau ID working points
         # Legacy (campaign.x.version < 10) vs New format (>=10)
         if campaign.x.version < 10:
@@ -390,13 +391,13 @@ def add_config(
                 "loose": 4, "medium": 5, "tight": 6,
                 "vtight": 7, "vvtight": 8,
             }
-    
+
         cfg.x.tau_id_working_points = DotDict.wrap({
             "tau_vs_e": wp_values_jet_or_e,
             "tau_vs_jet": wp_values_jet_or_e,
             "tau_vs_mu": wp_values_mu,
         })
-    
+
         # --- Tau trigger working points
         cfg.x.tau_trigger_working_points = DotDict.wrap({
             "id_vs_jet_v0": "VVLoose",
@@ -412,22 +413,24 @@ def add_config(
         cfg.x.tau_trigger_corrector_cclub = "tauTriggerSF"
         return cfg
 
-    def ConfigureJets(year, run, campaign):
+    def ConfigureJets(cfg, year, run, campaign):
         """
-        Configure JEC and JER campaigns and versions for Run 2 and Run 3.
+        Configure Jet Energy Corrections (JEC) and Jet Energy Resolution (JER)
         References:
             - Run 2: https://cms-jerc.web.cern.ch/Recommendations/#run-2
                       https://twiki.cern.ch/twiki/bin/view/CMS/JECDataMC?rev=204
                       https://twiki.cern.ch/twiki/bin/view/CMS/JetResolution?rev=109
             - Run 3: https://cms-jerc.web.cern.ch/Recommendations/#2022
         """
-        newyear = year%100
+        newyear = year % 100
+        jec_uncertainty_sources = analysis_data["jec_sources"]
+
         if run == 2:
             jec_version_map = {2016: "V7", 2017: "V5", 2018: "V5"}
             jer_version_map = {2016: "V3", 2017: "V2", 2018: "V2"}
             jec_campaign = f"Summer19UL{newyear}{campaign.x.postfix}"
             jer_campaign = f"Summer{'20' if year == 2016 else '19'}UL{newyear}{campaign.x.postfix}"
-            return {
+            jecjerdb = {
                 "jec_campaign": jec_campaign,
                 "jec_version": jec_version_map[year],
                 "jer_campaign": jer_campaign,
@@ -435,6 +438,7 @@ def add_config(
                 "jet_type": "AK4PFchs",
                 "data_per_era": False,
             }
+
         elif run == 3:
             jerc_postfix = {
                 (2022, ""): "_22Sep2023",
@@ -451,18 +455,18 @@ def add_config(
                 (2024, ""): "V1",
             }
             if not jerc_postfix:
-                raise ValueError(f"Unsupported JERC configuration for Run 3: year={year}, postfix={campaign.x.postfix}")
+                raise ValueError(f"Unsupported JERC configuration for Run 3: year={year}, postfix={campaign.x.postfix}")  # noqa: E501
             jec_campaign = f"Summer{newyear}{campaign.x.postfix}{jerc_postfix}"
             jer_campaign = f"Summer{newyear}{campaign.x.postfix}{jerc_postfix}"
-            # For the time being, use the Summer23BPix JERs for 2024 data. 
-            # The JER MC_ScaleFactor and MC_PtResolution for the Summer24 samples 
+            # For the time being, use the Summer23BPix JERs for 2024 data.
+            # The JER MC_ScaleFactor and MC_PtResolution for the Summer24 samples
             # will be announced soon (expected by the end of October 2025).
-            if year ==2024:
+            if year == 2024:
                 jer_campaign = "Summer23BPixPrompt23_RunD"
             # Add special Run fragment for 2023
             if year == 2023:
                 jer_campaign += f"_Run{'Cv1234' if campaign.has_tag('preBPix') else 'D'}"
-            return {
+            jecjerdb = {
                 "jec_campaign": jec_campaign,
                 "jec_version": jec_version_map[(year, campaign.x.postfix)],
                 "jer_campaign": jer_campaign,
@@ -471,19 +475,60 @@ def add_config(
                 "data_per_era": year == 2022,  # 2022 JEC depends on era
             }
 
+        if year in [2024, 2022]:
+            for src in ["TimeRunA", "TimeRunB", "TimeRunC", "TimeRunD"]:
+                if src in jec_uncertainty_sources:
+                    jec_uncertainty_sources.remove(src)
+
+        cfg.x.jec = DotDict.wrap({
+            "Jet": {
+                "campaign": jecjerdb["jec_campaign"],
+                "version": jecjerdb["jec_version"],
+                "data_per_era": jecjerdb["data_per_era"],
+                "jet_type": jecjerdb["jet_type"],
+                "levels": ["L1FastJet", "L2Relative", "L2L3Residual", "L3Absolute"],
+                "levels_for_type1_met": ["L1FastJet"],
+                "uncertainty_sources": jec_uncertainty_sources,
+            },
+        })
+
+        cfg.x.jer = DotDict.wrap({
+            "Jet": {
+                "campaign": jecjerdb["jer_campaign"],
+                "version": jecjerdb["jer_version"],
+                "jet_type": jecjerdb["jet_type"],
+            },
+        })
+
+        cfg.x.jet_id = JetIdConfig(
+            corrections={
+                "AK4PUPPI_Tight": 2,
+                "AK4PUPPI_TightLeptonVeto": 3,
+            })
+
+        cfg.x.fatjet_id = JetIdConfig(
+            corrections={
+                "AK8PUPPI_Tight": 2,
+                "AK8PUPPI_TightLeptonVeto": 3,
+            })
+
+        cfg.x.jet_trigger_corrector = "jetleg60"
+        return cfg
+
     def ConfigureLFNS(cfg, limit_dataset_files=None):
         """
         Configure custom methods for retrieving dataset LFNs depending on campaign settings.
         """
         cfg.x.get_dataset_lfns = None
         cfg.x.get_dataset_lfns_sandbox = None
-        
+
         # Handle special campaign type: "custom" with "creator" == "uhh"
         campaign_custom = cfg.campaign.x("custom", {})
         if campaign_custom.get("creator") != "uhh":
             return cfg  # No custom configuration needed
-    
-        def get_multileptons_dataset_lfns(dataset_inst: od.Dataset, shift_inst: od.Shift, dataset_key: str) -> list[str]:
+
+        def get_multileptons_dataset_lfns(dataset_inst: od.Dataset, shift_inst: od.Shift,
+                dataset_key: str) -> list[str]:
             """
             Retrieve LFNs for a given dataset under the UHH custom campaign convention.
             """
@@ -492,7 +537,7 @@ def add_config(
                 main_campaign, sub_campaign = full_campaign.split("-", 1)
             except ValueError:
                 raise ValueError(f"Invalid dataset key format: {dataset_key}")
-    
+
             path = f"store/{dataset_inst.data_source}/{main_campaign}/{dataset_id}/{tier}/{sub_campaign}/0"
             # Determine filesystem and directory target class
             custom_name = campaign_custom.get("name")
@@ -500,13 +545,13 @@ def add_config(
             local_fs = f"local_fs_{custom_name}"
             dir_cls = law.wlcg.WLCGDirectoryTarget
             fs_to_use = remote_fs
-    
+
             if law.config.has_section(local_fs):
                 base = law.target.file.remove_scheme(law.config.get_expanded(local_fs, "base"))
                 if os.path.exists(base):
                     dir_cls = law.LocalDirectoryTarget
                     fs_to_use = local_fs
-    
+
             lfn_base = dir_cls(path, fs=fs_to_use)
             # Retrieve all ROOT files and convert them to LFNs
             lfns = [
@@ -525,7 +570,7 @@ def add_config(
 
     def _names_from_tag(tag):
         return [s.name for s in cfg.shifts if s.has_tag(tag)]
-    
+
     def get_datasets_by_tag(tag):
         """Return converted dataset processes matching a given tag."""
         return [
@@ -551,7 +596,7 @@ def add_config(
             pruned_list = [prune_datasets_node(item) for item in node]
             return pruned_list
         return node
-        
+
     def add_external(name, value):
         if isinstance(value, dict):
             value = DotDict.wrap(value)
@@ -563,42 +608,43 @@ def add_config(
         cfg.add_shift(name=f"{base_name}_down", id=base_id + step, type="shape", tags=tags or set(), aux=aux)
         if aliases:
             add_shift_aliases(cfg, base_name, aliases)
-    
+
     def find_match_era(**kwargs):
         """Helper to enable processes/datasets only for specific era."""
         return (
-            (kwargs.get('run') is None or campaign.x.run in law.util.make_set(kwargs.get('run'))) and
-            (kwargs.get('year') is None or campaign.x.year in law.util.make_set(kwargs.get('year'))) and
-            (kwargs.get('postfix') is None or campaign.x.postfix in law.util.make_set(kwargs.get('postfix'))) and
-            (kwargs.get('tag') is None or campaign.has_tag(kwargs.get('tag'), mode=any)) and
-            (kwargs.get('nano') is None or campaign.x.version in law.util.make_set(kwargs.get('nano')))
+            (kwargs.get("run") is None or campaign.x.run in law.util.make_set(kwargs.get("run"))) and
+            (kwargs.get("tag") is None or campaign.has_tag(kwargs.get("tag"), mode=any)) and
+            (kwargs.get("year") is None or campaign.x.year in law.util.make_set(kwargs.get("year"))) and
+            (kwargs.get("nano") is None or campaign.x.version in law.util.make_set(kwargs.get("nano"))) and
+            (kwargs.get("postfix") is None or campaign.x.postfix in law.util.make_set(kwargs.get("postfix")))
         )
 
     def in_era(values=None, **kwargs):
         """
-        Return a filtered list of values if the current era matches, 
+        Return a filtered list of values if the current era matches,
         or an empty list otherwise.
         """
         return list(filter(bool, values or [])) if find_match_era(**kwargs) else []
-    
+
     def not_in_era(**kwargs):
         return not bool(in_era(**kwargs))
- 
+
     def in_config(names=None, ids=None, values=None):
         """
         Return a filtered list of values if cfg.id is in the provided ids,
         or cfg.name in the provided names
         or an empty list otherwise.
         """
-        if names: return list(filter(bool, values or [])) if cfg.name in names else []
-        elif ids: return list(filter(bool, values or [])) if cfg.id in ids else []
-    
+        if names: return list(filter(bool, values or [])) if cfg.name in names else []  # noqa: E701
+        elif ids: return list(filter(bool, values or [])) if cfg.id in ids else []  # noqa: E701
+
     def not_in_config(**kwargs):
         return not bool(in_config(**kwargs))
-            
-    #=============================================
+
+    # =============================================
     # configure some default objects
-    #=============================================
+    # =============================================
+    TopPtWeightFromTheory = False
     cfg.x.default_selector_steps = "all"
     cfg.x.default_calibrator = "default"
     cfg.x.default_selector = "default"
@@ -609,33 +655,34 @@ def add_config(
     cfg.x.default_categories = ("all",)
     cfg.x.default_variables = ("njet", "nlep")
     cfg.x.default_hist_producer = "default"
-    cfg.x.external_files = DotDict() 
+    cfg.x.external_files = DotDict()
     cfg.x.minbias_xs = Number(69.2, 0.046j)
-    
+
     btagJECsources = analysis_data.get("btag_sf_jec_sources", [])
-    btagJECsources += [f"Absolute_{year}", f"BBEC1_{year}", f"EC2_{year}", f"HF_{year}", f"RelativeSample_{year}", ""] 
-    cfg.x.btag_working_points = bTagWorkingPoints(year, run, campaign)
+    btagJECsources += [f"Absolute_{year}", f"BBEC1_{year}", f"EC2_{year}", f"HF_{year}", f"RelativeSample_{year}", ""]
     cfg.x.btag_sf_jec_sources = btagJECsources
-    
+    cfg.x.btag_working_points = bTagWorkingPoints(year, run, campaign)
+
     ConfigureLuminosity(cfg, campaign, year, analysis_data)
+    ConfigureLFNS(cfg, limit_dataset_files)
     ConfigureTaus(cfg, run, campaign)
     ConfigureElectrons(cfg, run, year, campaign)
     ConfigureMuons(cfg, run, year, campaign)
-    ConfigureLFNS(cfg, limit_dataset_files)
-    
-    #=============================================
+    ConfigureJets(cfg, year, run, campaign)
+
+    # =============================================
     # processes and datasets - using YAML configuration
-    #=============================================
-    dataset_names = process_names = {'data': [], 'signal': [], 'background': []}
-    all_datasets_in_config = analysis_cfg.get_dataset_list('all')
+    # =============================================
+    dataset_names = process_names = {"data": [], "signal": [], "background": []}
+    all_datasets_in_config = analysis_cfg.get_dataset_list("all")
     valid_datasets = [d for d in all_datasets_in_config if campaign.has_dataset(d)]
     valid_datasets_set = set(valid_datasets)
     datasets_config = analysis_cfg.data.get("datasets", {})
     datasets_config = prune_datasets_node(datasets_config)
     analysis_cfg.data["datasets"] = datasets_config
-    
+
     # Loop over signal and background
-    for dtype in ['signal', 'background']:
+    for dtype in ["signal", "background"]:
         for dataset_name in analysis_cfg.get_dataset_list(dtype):
             tags = []
             proc, id = convert_dataset_to_process(dataset_name, campaign, all_processes_from_campaign)
@@ -649,19 +696,19 @@ def add_config(
             if law.util.multi_match(dataset.name, [
                 r"^(ww|wz|zz)_.*pythia$",
                 r"^tt(w|z)_.*amcatnlo$",
-                ]):
+            ]):
                 # datasets that are known to have no lhe info at all
                 dataset.add_tag("no_lhe_weights")
             if re.match(r"^dy_m50toinf_\dj_(|pt.+_)amcatnlo$", dataset.name):
                 dataset.add_tag("dy_stitched")
             if re.match(r"^w_lnu_\dj_(|pt.+_)amcatnlo$", dataset.name):
                 dataset.add_tag("w_lnu_stitched")
-            for sig in ['ggf', 'vbf']:
-                if dataset.name.startswith(f'hh_{sig}_htt_htt'):
+            for sig in ["ggf", "vbf"]:
+                if dataset.name.startswith(f"hh_{sig}_htt_htt"):
                     dataset.add_tag(f"{sig}_4t")
-                elif dataset.name.startswith(f'hh_{sig}_htt_hvv'):
+                elif dataset.name.startswith(f"hh_{sig}_htt_hvv"):
                     dataset.add_tag(f"{sig}_2t2v")
-                elif dataset.name.startswith(f'hh_{sig}_hvv_hvv'):
+                elif dataset.name.startswith(f"hh_{sig}_hvv_hvv"):
                     dataset.add_tag(f"{sig}_4v")
             # datasets that are allowed to contain some events with missing lhe infos
             # (known to happen for amcatnlo)
@@ -672,44 +719,44 @@ def add_config(
             if limit_dataset_files:
                 for info in dataset.info.values():
                     info.n_files = min(info.n_files, limit_dataset_files)
-    
+
     # Add data
     streams = datasets_config["data"]["streams"]
     for y, year_cfg in datasets_config["data"].items():
         if y == "streams" or int(y) != campaign.x.year:
             continue
-    
+
         # Normalize: if year_cfg is a dict (like 2024), wrap it into a list
         if isinstance(year_cfg, dict):
             year_cfg = [year_cfg]
-    
+
         # year_cfg is now always a list of tag blocks
         for tag_block in year_cfg:
             if "periods" in tag_block and len(tag_block) == 1:
                 tag_block = {"": tag_block}  # empty tag name
-    
+
             for tag, tag_cfg in tag_block.items():
                 periods = tag_cfg["periods"]
                 requested_data = [
-                            *in_era(
-                                year=y,
-                                **({"tag": tag} if tag else {}),
-                                values=[
-                                    f"data_{stream}_{period}"
-                                    for stream in streams
-                                    for period in periods],
-                                    )]
+                    *in_era(
+                        year=y,
+                        **({"tag": tag} if tag else {}),
+                        values=[
+                            f"data_{stream}_{period}"
+                            for stream in streams
+                            for period in periods],
+                    )]
                 valid_datasets = [d for d in requested_data if campaign.has_dataset(d)]
                 valid_datasets_set = set(valid_datasets)
-                dataset_names['data'] += valid_datasets_set
+                dataset_names["data"] += valid_datasets_set
                 for dataset_name in valid_datasets_set:
                     dataset = cfg.add_dataset(campaign.get_dataset(dataset_name))
-                    proc = '_'.join(dataset_name.split('_')[:2])
+                    proc = "_".join(dataset_name.split("_")[:2])
                     id = next((p.id for p in all_processes_from_campaign if p.name == proc), None)
                     if id is None:
                         raise ValueError(f"No process found with name '{proc}' in run{run} campaign: {campaign}")
-                    if proc not in process_names['data']:
-                        process_names['data'] +=[proc]
+                    if proc not in process_names["data"]:
+                        process_names["data"] += [proc]
                         cfg.add_process(proc, id)
                     if dataset.name.startswith("data_e_"):
                         dataset.add_tag({"etau", "emu_from_e", "ee"})
@@ -728,10 +775,10 @@ def add_config(
                     if limit_dataset_files:
                         for info in dataset.info.values():
                             info.n_files = min(info.n_files, limit_dataset_files)
-   
+
     # verify that the root process of each dataset is part of any of the registered processes
     verify_config_processes(cfg, warn=True)
- 
+
     # process groups for conveniently looping over certain processs
     # (used in wrapper_factory and during plotting)
     decays = ["4v", "4t", "2t2v"]
@@ -743,16 +790,16 @@ def add_config(
     }
 
     cfg.x.process_groups = {
-        "nonresonant_ggf": (nonresonant_ggf := datasets_config['signal']['nonresonant']['ggf']['cmsdb']),
-        "nonresonant_vbf": (nonresonant_vbf := datasets_config['signal']['nonresonant']['vbf']['cmsdb']),
+        "nonresonant_ggf": (nonresonant_ggf := datasets_config["signal"]["nonresonant"]["ggf"]["cmsdb"]),
+        "nonresonant_vbf": (nonresonant_vbf := datasets_config["signal"]["nonresonant"]["vbf"]["cmsdb"]),
         "nonresonant": [*nonresonant_ggf, *nonresonant_vbf],
-        "resonant": (resonant := datasets_config['signal']['resonant']['cmsdb']),
-        "all_data":(process_names['data']),
-        "all_signals": (all_signals := [*resonant, *nonresonant_vbf, *nonresonant_ggf]),
-        "all_backgrounds": (all_backgrounds := process_names['background']),
+        "resonant": (resonant := datasets_config["signal"]["resonant"]["cmsdb"]),
+        "all_data": (process_names["data"]),
+        "all_signals": (all_signals := [*resonant, *nonresonant_vbf, *nonresonant_ggf]),  # noqa: F841
+        "all_backgrounds": (all_backgrounds := process_names["background"]),  # noqa: F841
         # decay channel for all modes to pass
         # ggf_4v, ggf_4t, ggf_2t2v, vbf_4v, vbf_4t, vbf_2t2v
-         **nonresonant_signal_groups,
+        **nonresonant_signal_groups,
         # decay modes merged for productions to pass
         "4v": [*nonresonant_signal_groups["ggf_4v"], *nonresonant_signal_groups["vbf_4v"]],
         "4t": [*nonresonant_signal_groups["ggf_4t"], *nonresonant_signal_groups["vbf_4t"]],
@@ -761,30 +808,30 @@ def add_config(
 
     # define inclusive datasets for the stitched process identification with corresponding leaf processes
     # Drell-Yan and W+jets configurations
-    #cfg.x.dy_stitching = {
+    # cfg.x.dy_stitching = {
     #    "m50toinf": build_stitching_config("dy_m50toinf", cfg.datasets.n.dy_m50toinf_amcatnlo),}
-    #cfg.x.w_lnu_stitching = {
+    # cfg.x.w_lnu_stitching = {
     #   "incl": build_stitching_config("w_lnu", cfg.datasets.n.w_lnu_amcatnlo),}
 
     # Background dataset groups
     background_groups = {}
-    backgrounds = datasets_config.get('background', {})
+    backgrounds = datasets_config.get("background", {})
     for bkg_name, bkg_cfg in backgrounds.items():
-        cmsdb_entries = bkg_cfg.get('cmsdb', [])
+        cmsdb_entries = bkg_cfg.get("cmsdb", [])
         if cmsdb_entries:
             background_groups[bkg_name] = cmsdb_entries
-     
+
     # dataset groups for conveniently looping over certain datasets
     # (used in wrapper_factory and during plotting)
     cfg.x.dataset_groups = {
-        "all_data": (data_group := [dataset.name for dataset in cfg.datasets if dataset.is_data]),
-        "all_signals": (signals_group := [dataset.name for dataset in cfg.datasets if dataset.has_tag("signal")]),
+        "all_data": (data_group := [dataset.name for dataset in cfg.datasets if dataset.is_data]),  # noqa: F841
+        "all_signals": (signals_group := [dataset.name for dataset in cfg.datasets if dataset.has_tag("signal")]),  # noqa: E501,F841
         "all_backgrounds": (backgrounds := [
             dataset.name for dataset in cfg.datasets
             if dataset.is_mc and not dataset.has_tag("signal")
         ]),
-        **background_groups, # so basically the keys in the yaml datasets:background:
-        "backgrounds_unstitched": (backgrounds_unstitched := [
+        **background_groups,  # so basically the keys in the yaml datasets:background:
+        "backgrounds_unstitched": (backgrounds_unstitched := [   # noqa: F841
             dataset.name for dataset in cfg.datasets
             if (
                 dataset.is_mc and
@@ -823,55 +870,11 @@ def add_config(
     # plotting overwrites
     stylize_processes(cfg, datasets_config)
     # Configure colors, labels, etc
-    setup_plot_styles(cfg, analysis_data.get('plot_defaults',{})) 
+    setup_plot_styles(cfg, analysis_data.get("plot_defaults", {}))
 
-    #=============================================
-    # Jet Energy Corrections (JEC) and Jet Energy Resolution (JER)
-    #=============================================
-    jecjerdb = ConfigureJets(year, run, campaign)
-    jec_uncertainty_sources = analysis_data['jec_sources']
-    if year == 2024:
-        for src in ["TimeRunA", "TimeRunB", "TimeRunC", "TimeRunD"]:
-            if src in jec_uncertainty_sources:
-                jec_uncertainty_sources.remove(src)
-
-    cfg.x.jec = DotDict.wrap({
-        "Jet": {
-            "campaign": jecjerdb["jec_campaign"],
-            "version": jecjerdb["jec_version"],
-            "data_per_era": jecjerdb["data_per_era"],
-            "jet_type": jecjerdb["jet_type"],
-            "levels": ["L1FastJet", "L2Relative", "L2L3Residual", "L3Absolute"],
-            "levels_for_type1_met": ["L1FastJet"],
-            "uncertainty_sources": jec_uncertainty_sources, 
-        },
-    })
-    
-    cfg.x.jer = DotDict.wrap({
-        "Jet": {
-            "campaign": jecjerdb["jer_campaign"],
-            "version": jecjerdb["jer_version"],
-            "jet_type": jecjerdb["jet_type"],
-        },
-    })
-    
-    cfg.x.jet_id = JetIdConfig( 
-        corrections={
-            "AK4PUPPI_Tight": 2,
-            "AK4PUPPI_TightLeptonVeto": 3,
-        })
-
-    cfg.x.fatjet_id = JetIdConfig(
-        corrections={
-            "AK8PUPPI_Tight": 2,
-            "AK8PUPPI_TightLeptonVeto": 3,
-        })
-    
-    cfg.x.jet_trigger_corrector = "jetleg60" 
-    
-    #=============================================
+    # =============================================
     # met settings
-    #=============================================
+    # =============================================
     if run == 2:
         cfg.x.met_name = "MET"
         cfg.x.raw_met_name = "RawMET"
@@ -899,10 +902,10 @@ def add_config(
                 "pu_up": "minbias_xs_up",
             },
         )
-    
-    #=============================================
-    # b-tag working points 
-    #=============================================
+
+    # =============================================
+    # b-tag working points
+    # =============================================
     cfg.x.btag_sf_deepjet = BTagSFConfig(
         correction_set="deepJet_shape",
         jec_sources=cfg.x.btag_sf_jec_sources,
@@ -915,36 +918,38 @@ def add_config(
             discriminator="btagPNetB",
         )
 
-    #=============================================
+    # =============================================
     # top pt reweighting
     # https://twiki.cern.ch/twiki/bin/view/CMS/TopPtReweighting?rev=31
-    #=============================================
+    # =============================================
     # theory-based method preferred
-    # cfg.x.top_pt_weight = TopPtWeightFromTheoryConfig(params={
-    #     "a": 0.103,
-    #     "b": -0.0118,
-    #     "c": -0.000134,
-    #     "d": 0.973,
-    # })
-    # data-based method preferred
-    cfg.x.top_pt_weight = TopPtWeightFromDataConfig(
-        params={
-            "a": 0.0615,
-            "a_up": 0.0615 * 1.5,
-            "a_down": 0.0615 * 0.5,
-            "b": -0.0005,
-            "b_up": -0.0005 * 1.5,
-            "b_down": -0.0005 * 0.5,
-        },
-        pt_max=500.0,
-    )
+    if TopPtWeightFromTheory:
+        cfg.x.top_pt_weight = TopPtWeightFromTheoryConfig(params={
+            "a": 0.103,
+            "b": -0.0118,
+            "c": -0.000134,
+            "d": 0.973,
+        })
+    else:
+        # data-based method preferred
+        cfg.x.top_pt_weight = TopPtWeightFromDataConfig(
+            params={
+                "a": 0.0615,
+                "a_up": 0.0615 * 1.5,
+                "a_down": 0.0615 * 0.5,
+                "b": -0.0005,
+                "b_up": -0.0005 * 1.5,
+                "b_down": -0.0005 * 0.5,
+            },
+            pt_max=500.0,
+        )
 
-    #=============================================
-    # dy reweighting and recoil 
-    #=============================================
+    # =============================================
+    # dy reweighting and recoil
+    # =============================================
     if run == 3:
         era = analysis_cfg.get_era(campaign)
-        
+
         # dy reweighting
         # https://cms-higgs-leprare.docs.cern.ch/htt-common/DY_reweight
         cfg.x.dy_weight_config = DrellYanConfig(
@@ -961,14 +966,14 @@ def add_config(
             order="NLO",
             correction="Recoil_correction_Rescaling",
             unc_correction="Recoil_correction_Uncertainty",
-        ) 
+        )
 
-    #=============================================
+    # =============================================
     # shifts
-    #=============================================
+    # =============================================
     # load JEC sources
     all_jec_sources = analysis_data.get("jec_sources", [])
-    
+
     # nominal + simple shifts
     simple_shifts = [
         # (name, base_id, aliases, tags, aux)
@@ -982,13 +987,13 @@ def add_config(
         }),
         ("top_pt", 9, None, None, {"top_pt_weight": "top_pt_weight_{direction}"}),
     ]
-    
+
     for name, base_id, aliases, tags, aux in simple_shifts:
-        if name =='nominal':
+        if name == "nominal":
             cfg.add_shift(name, base_id)
         else:
             register_shift_pair(cfg, name, base_id, aliases, tags, aux)
-    
+
     # JEC sources
     for jec_source in cfg.x.jec.Jet.uncertainty_sources:
         idx = all_jec_sources.index(jec_source)
@@ -1000,7 +1005,7 @@ def add_config(
             f"{cfg.x.met_name}.phi": f"{cfg.x.met_name}.phi_{{name}}",
         }
         register_shift_pair(cfg, f"jec_{jec_source}", jec_id, jec_aliases, {"jec"}, {"jec_source": jec_source})
-    
+
         # link btag-related JEC sources
         if ("" if jec_source == "Total" else jec_source) in cfg.x.btag_sf_jec_sources:
             btag_aliases = {
@@ -1010,7 +1015,7 @@ def add_config(
                 "normalized_njet_btag_pnet_weight": "normalized_njet_btag_pnet_weight_{name}",
             }
             add_shift_aliases(cfg, f"jec_{jec_source}", btag_aliases)
-    
+
     # JER
     jer_aliases = {
         "Jet.pt": "Jet.pt_{name}",
@@ -1019,8 +1024,8 @@ def add_config(
         f"{cfg.x.met_name}.phi": f"{cfg.x.met_name}.phi_{{name}}",
     }
     register_shift_pair(cfg, "jer", 6000, jer_aliases, {"jer"})
-    
-    # TEC shifts 
+
+    # TEC shifts
     for i, (match, dm) in enumerate(itertools.product(["jet", "e"], [0, 1, 10, 11])):
         tec_aliases = {
             "Tau.pt": "Tau.pt_{name}",
@@ -1029,8 +1034,8 @@ def add_config(
             f"{cfg.x.met_name}.phi": f"{cfg.x.met_name}.phi_{{name}}",
         }
         register_shift_pair(cfg, f"tec_{match}_dm{dm}", 20 + 2 * i, tec_aliases, {"tec"})
-    
-    # TAU uncertainties 
+
+    # TAU uncertainties
     cfg.x.tau_unc_names = [
         "jet_dm0", "jet_dm1", "jet_dm10", "jet_dm11",
         "e_barrel", "e_endcap",
@@ -1038,7 +1043,7 @@ def add_config(
     ]
     for i, unc in enumerate(cfg.x.tau_unc_names):
         register_shift_pair(cfg, f"tau_{unc}", 50 + 2 * i, {"tau_weight": f"tau_weight_{unc}_{{direction}}"})
-    
+
     # Electron, muon, and energy corrections
     register_shift_pair(cfg, "e", 90, {"electron_weight": "electron_weight_{direction}"})
     register_shift_pair(cfg, "mu", 100, {"muon_weight": "muon_weight_{direction}"})
@@ -1046,7 +1051,7 @@ def add_config(
         logger.debug("adding ees and eer shifts")
         register_shift_pair(cfg, "ees", 92, {"Electron.pt": "Electron.pt_scale_{direction}"}, {"eec"})
         register_shift_pair(cfg, "eer", 94, {"Electron.pt": "Electron.pt_res_{direction}"}, {"eer"})
-    
+
     # b-tag uncertainties
     cfg.x.btag_unc_names = [
         "hf", "lf",
@@ -1060,7 +1065,7 @@ def add_config(
             "normalized_njet_btag_deepjet_weight": f"normalized_njet_btag_deepjet_weight_{unc}_{{direction}}",
         }
         register_shift_pair(cfg, f"btag_{unc}", 110 + 2 * i, btag_aliases)
-    
+
     # LHE variations
     lhe_shifts = {
         "pdf": 130,
@@ -1074,33 +1079,33 @@ def add_config(
             f"normalized_{name}_weight": f"normalized_{name}_weight_{{direction}}",
         }
         register_shift_pair(cfg, name, base_id, aliases, {"lhe_weight"} if name in ["pdf", "murmuf"] else None)
-    
+
     # trigger scale factors
     trigger_legs = ["e", "mu", "tau_dm0", "tau_dm1", "tau_dm10", "tau_dm11", "jet"]
     for i, leg in enumerate(trigger_legs):
         register_shift_pair(cfg, f"trigger_{leg}", 180 + 2 * i)
-   
-    #=============================================
-    # Add scale-factors from correction lib 
-    #=============================================
+
+    # =============================================
+    # Add scale-factors from correction lib
+    # =============================================
     if run == 2:
         tauPOGJsonFile = "tau.json.gz"
         metPOGJsonFile = "met.json.gz"
 
-    elif run == 3: # nasty names, workaround, also missing corrections for 2024 still
+    elif run == 3:  # nasty names, workaround, also missing corrections for 2024 still
         if year == 2022:
             met_pog_suffix = f"{year}_{year}{'' if campaign.has_tag('preEE') else 'EE'}"
             tau_pog_suffix = f"{'pre' if campaign.has_tag('preEE') else 'post'}EE"
         elif year == 2023:
             met_pog_suffix = f"{year}_{year}{'' if campaign.has_tag('preBPix') else 'BPix'}"
             tau_pog_suffix = f"{'pre' if campaign.has_tag('preBPix') else 'post'}BPix"
-        if year == 2024: # just for now FIXME 
+        if year == 2024:  # just for now FIXME
             tauPOGJsonFile = "tau_DeepTau2018v2p5_2023_preBPix.json.gz"
             metPOGJsonFile = "met_xyCorrections_2024.json.gz"
         else:
             tauPOGJsonFile = f"tau_DeepTau2018v2p5_{year}_{tau_pog_suffix}.json.gz"
             metPOGJsonFile = f"met_xyCorrections_{met_pog_suffix}.json.gz"
-       
+
         campaign_tag = ""
         for tag in ("preEE", "postEE", "preBPix", "postBPix"):
             if campaign.has_tag(tag, mode=any):
@@ -1108,27 +1113,30 @@ def add_config(
                     raise ValueError(f"Multiple campaign tags found: {cfg.x.campaign_tag} and {tag}")
                 campaign_tag = tag
 
-    ver = '_v1' if year == 2024 else ''
+    ver = "_v1" if year == 2024 else ""
     # common files
     # (versions in the end are for hashing in cases where file contents changed but paths did not)
-    goldenFile = analysis_data['years'][year]["certified_lumi_file"]
-    normtagFile = analysis_data['years'][year]["normtag"]
+    goldenFile = analysis_data["years"][year]["certified_lumi_file"]
+    normtagFile = analysis_data["years"][year]["normtag"]
 
-    add_external("lumi", {"golden":(goldenFile, "v1"), "normtag": (normtagFile, "v1")})
+    add_external("lumi", {"golden": (goldenFile, "v1"), "normtag": (normtagFile, "v1")})
     add_external("jet_jerc", (localizePOGSF(year, "JME", "jet_jerc.json.gz"), "v1"))
     add_external("jet_veto_map", (localizePOGSF(year, "JME", "jetvetomaps.json.gz"), "v1"))
     add_external("muon_sf", (localizePOGSF(year, "MUO", "muon_Z.json.gz"), "v1"))
     add_external("electron_sf", (localizePOGSF(year, "EGM", f"electron{ver}.json.gz"), "v1"))
-    
+
     getfromyear = year
-    if year == 2024: 
-        getfromyear = 2023 # these corrections are still missing for 2024 workaround with 2023 preBPix for now
+    if year == 2024:
+        getfromyear = 2023  # these corrections are still missing for 2024 workaround with 2023 preBPix for now
         tau_pog_suffix = "preBPix"
+        add_external("met_phi_corr", (f"{os.path.dirname(os.path.abspath(__file__))}/../data/{metPOGJsonFile}", "v1"))
+    else:
+        add_external("met_phi_corr", (localizePOGSF(getfromyear, "JME", f"{metPOGJsonFile}"), "v1"))
     add_external("btag_sf_corr", (localizePOGSF(getfromyear, "BTV", "btagging.json.gz"), "v1"))
     add_external("tau_sf", (localizePOGSF(getfromyear, "TAU", f"{tauPOGJsonFile}"), "v1"))
     add_external("pu_sf", (localizePOGSF(getfromyear, "LUM", "puWeights.json.gz"), "v1"))
-    add_external("met_phi_corr", (f"{os.path.dirname(os.path.abspath(__file__))}/../data/{metPOGJsonFile}", "v1"))
-    add_external("trigger_sf", Ext(f"{os.path.dirname(os.path.abspath(__file__))}/../data/TriggerScaleFactors/{getfromyear}{tau_pog_suffix}",
+    add_external("trigger_sf", Ext(
+        f"{os.path.dirname(os.path.abspath(__file__))}/../data/TriggerScaleFactors/{getfromyear}{tau_pog_suffix}",
         subpaths=DotDict(
             muon="temporary_MuHlt_abseta_pt.json.gz",
             cross_muon="CrossMuTauHlt.json.gz",
@@ -1136,10 +1144,10 @@ def add_config(
             cross_electron="CrossEleTauHlt.json.gz",
             tau=f"tau_trigger_DeepTau2018v2p5_{getfromyear}{tau_pog_suffix}.json.gz",
             jet=f"ditaujet_jetleg60_{getfromyear}{tau_pog_suffix}.json.gz",
-            ),
-            version="v1",
-        ))
- 
+        ),
+        version="v1",
+    ))
+
     # run specific files
     if run == 2:
         add_external("tau_trigger_sf", (localizePOGSF(year, "TAU", "tau.json.gz"), "v1"))
@@ -1147,10 +1155,10 @@ def add_config(
         # electron energy correction and smearing
         add_external("electron_ss", (localizePOGSF(year, "EGM", f"electronSS_EtDependent{ver}.json.gz"), "v1"))
         add_external("jet_id", (localizePOGSF(year, "JME", "jetid.json.gz"), "v1"))
-            
-    #=============================================
+
+    # =============================================
     # reductions
-    #=============================================
+    # =============================================
     # target file size after MergeReducedEvents in MB
     cfg.x.reduced_file_size = 512.0
     # columns to keep after certain steps
@@ -1191,23 +1199,23 @@ def add_config(
             "*", *skip_column("*_{up,down}"),
         },
     })
-    
-    #=============================================
+
+    # =============================================
     # Add event weights configuration
     # Each key corresponds to a possible event weight column.
     # Each value is a list of shift dependencies (from systematics sources).
     # This mapping is used by weight producers later in the workflow.
-    #=============================================
+    # =============================================
     get_shifts = functools.partial(get_shifts_from_sources, cfg)
-    
+
     # --- Global event weight configuration ---
     base_event_weights = {
-        "pdf_weight":                 get_shifts("pdf"),
-        "murmuf_weight":              get_shifts("murmuf"),
-        "normalization_weight":       [],
+        "pdf_weight": get_shifts("pdf"),
+        "murmuf_weight": get_shifts("murmuf"),
+        "normalization_weight": [],
         "normalization_weight_inclusive": [],
-        "normalized_isr_weight":      get_shifts("isr"),
-        "normalized_fsr_weight":      get_shifts("fsr"),
+        "normalized_isr_weight": get_shifts("isr"),
+        "normalized_fsr_weight": get_shifts("fsr"),
         # "normalized_pu_weight": get_shifts("minbias_xs"),
         # "normalized_njet_btag_deepjet_weight": get_shifts(*(f"btag_{u}" for u in cfg.x.btag_unc_names)),
         # "electron_weight": get_shifts("e"),
@@ -1217,7 +1225,7 @@ def add_config(
     }
     # Store in the config (preserving DotDict interface)
     cfg.x.event_weights = DotDict(base_event_weights)
-    
+
     # --- Per-dataset customizations ---
     for dataset in cfg.datasets:
         # Initialize empty mapping for each dataset (inherits from global)
@@ -1227,7 +1235,7 @@ def add_config(
         elif dataset.has_tag("dy"):
             # Placeholder for Drell–Yan reweighting uncertainties
             dataset.x.event_weights["dy_weight"] = []  # TODO: add DY uncertainty sources
-    
+
     # -----------------------------------------------------------------------------
     # Shift groups (for plotting / uncertainty grouping)
     # -----------------------------------------------------------------------------
@@ -1244,24 +1252,24 @@ def add_config(
         "pu": [s.name for s in get_shifts("minbias_xs")],
     }
 
-    #=============================================
+    # =============================================
     # add channels
-    #=============================================
-    #for channel_config in analysis_data.get("channels", []):
+    # =============================================
+    # for channel_config in analysis_data.get("channels", []):
     #        cfg.add_channel(
     #            name=channel_config["name"],
     #            id=channel_config["id"],
     #            label=channel_config["label"],
     #        )
-   
-    # 2lep 
+
+    # 2lep
     cfg.add_channel(name="cetau", id=1, label=r"$e\tau_{h}$")
     cfg.add_channel(name="cmutau", id=2, label=r"$\mu\tau_{h}$")
     cfg.add_channel(name="ctautau", id=3, label=r"$\tau_{h}\tau_{h}$")
     cfg.add_channel(name="cee", id=4, label=r"$ee$")
     cfg.add_channel(name="cmumu", id=5, label=r"$\mu\mu$")
     cfg.add_channel(name="cemu", id=6, label=r"$e\mu$")
-    # 3lep 
+    # 3lep
     cfg.add_channel(name="c3e", id=14, label=r"$eee$")
     cfg.add_channel(name="c2emu", id=15, label=r"$ee\mu$")
     cfg.add_channel(name="ce2mu", id=16, label=r"$e\mu\mu$")
@@ -1286,13 +1294,13 @@ def add_config(
     cfg.add_channel(name="c2e0or1tau", id=33, label=r"$ee\  \leq 1\,\tau_{h}$")
     cfg.add_channel(name="cemu0or1tau", id=34, label=r"$e\mu\ \leq 1\,\tau_{h}$")
     cfg.add_channel(name="c2mu0or1tau", id=35, label=r"$\mu\mu\ \leq 1\,\tau_{h}$")
-  
-    #=============================================
+
+    # =============================================
     # add variables, categories , met and triggers
-    #=============================================
+    # =============================================
     add_categories(cfg)
     add_variables(cfg)
     add_met_filters(cfg)
     add_triggers(cfg)
-    
+
     return cfg

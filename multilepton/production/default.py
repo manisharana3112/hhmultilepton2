@@ -114,4 +114,5 @@ def default_init(self: Producer, **kwargs) -> None:
         self.uses |= weight_producers
         self.produces |= weight_producers
 
+
 empty = default.derive("empty", cls_dict={"produce_weights": False})

@@ -20,7 +20,7 @@ def patch_columnar_pyarrow_version():
     Comments out the pyarrow==21.0.0 line in the columnar.txt sandbox file.
     """
     columnar_path = os.path.join(
-        os.environ["MULTILEPTON_BASE"], "modules", "columnflow", "sandboxes", "columnar.txt"
+        os.environ["MULTILEPTON_BASE"], "modules", "columnflow", "sandboxes", "columnar.txt",
     )
 
     if not os.path.exists(columnar_path):
@@ -105,7 +105,6 @@ def patch_slurm_partition_setting():
     by commandline instead of overiding with central default.
     """
     from columnflow.tasks.framework.remote import RemoteWorkflow
-    
     RemoteWorkflow.exclude_params_branch.remove("slurm_partition")
     RemoteWorkflow.slurm_partition.significant = True
     RemoteWorkflow.exclude_params_branch.remove("slurm_flavor")
@@ -128,7 +127,7 @@ def patch_missing_xsec_handling():
     def patched_normalization_weights_setup(*args, **kwargs):
         # Get the self argument to access config_inst etc.
         self = args[0]
-        process_insts = kwargs.get("process_insts") or getattr(self, "process_insts", [])
+        # process_insts = kwargs.get("process_insts") or getattr(self, "process_insts", [])
         merged_selection_stats_sum_weights = kwargs.get("merged_selection_stats_sum_weights") or {}
 
         # Redefine an inner function to wrap the logic safely
@@ -136,9 +135,8 @@ def patch_missing_xsec_handling():
             ecm = self.config_inst.campaign.ecm
             if ecm not in process_inst.xsecs:
                 logger.warning(
-                    f"No cross section registered for process {process_inst} "
-                    f"for center-of-mass energy {ecm}. Setting xsec = 1.0 for now."
-                )
+                    f"No cross section registered for process {process_inst} ",
+                    f"for center-of-mass energy {ecm}. Setting xsec = 1.0 for now.")
                 xsec = 1.0
             else:
                 xsec = process_inst.get_xsec(ecm).nominal
@@ -160,6 +158,6 @@ def patch_all():
     patch_remote_workflow_poll_interval()
     patch_slurm_partition_setting()
     patch_merge_reduction_stats_inputs()
-    patch_columnar_pyarrow_version()    
-    patch_missing_xsec_handling()    
-    #patch_htcondor_workflow_naf_resources()
+    patch_columnar_pyarrow_version()
+    patch_missing_xsec_handling()
+    # patch_htcondor_workflow_naf_resources()

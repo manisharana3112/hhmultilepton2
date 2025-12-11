@@ -8,7 +8,7 @@ import order as od
 
 from functools import partial
 
-from columnflow.columnar_util import EMPTY_FLOAT, attach_coffea_behavior, default_coffea_collections
+from columnflow.columnar_util import EMPTY_FLOAT
 from columnflow.util import maybe_import
 
 ak = maybe_import("awkward")
@@ -55,7 +55,7 @@ def build_m4l(events):
     return objects_sum.mass
 
 
-def build_nbjets(events, which=None, wp="medium"):
+def build_nbjets(config, events, which=None, wp="medium"):
     if which == "btagPNetB":
         wp_value = config.x.btag_working_points["particleNet"][wp]
     elif which == "btagDeepFlavB":
@@ -76,7 +76,7 @@ def add_variables(config: od.Config) -> None:
     build_dilep.inputs = ["{Electron,Muon,Tau}.{pt,eta,phi,mass}"]
     build_m4l.inputs = ["{Electron,Muon}.{pt,eta,phi,mass}"]
     build_nbjets.inputs = ["Jet.{btagPNetB,btagDeepFlavB}"]
-    
+
     add_variable(
         config,
         name="event",
@@ -262,7 +262,7 @@ def add_variables(config: od.Config) -> None:
     add_variable(
         config,
         name="nbjets_deepjet_medium",
-        expression=partial(build_nbjets, which="btagDeepFlavB"),
+        expression=partial(build_nbjets, config, which="btagDeepFlavB"),
         aux={"inputs": build_nbjets.inputs},
         binning=(11, -0.5, 10.5),
         x_title=r"Number of b-jets (DeepJet medium)",
@@ -271,7 +271,7 @@ def add_variables(config: od.Config) -> None:
     add_variable(
         config,
         name="nbjets_pnet_medium",
-        expression=partial(build_nbjets, which="btagPNetB"),
+        expression=partial(build_nbjets, config, which="btagPNetB"),
         aux={"inputs": build_nbjets.inputs},
         binning=(11, -0.5, 10.5),
         x_title=r"Number of b-jets (PNet medium)",
@@ -280,7 +280,7 @@ def add_variables(config: od.Config) -> None:
     add_variable(
         config,
         name="nbjets_deepjet_loose",
-        expression=partial(build_nbjets, which="btagDeepFlavB", wp="loose"),
+        expression=partial(build_nbjets, config, which="btagDeepFlavB", wp="loose"),
         aux={"inputs": build_nbjets.inputs},
         binning=(11, -0.5, 10.5),
         x_title=r"Number of b-jets (DeepJet loose)",
@@ -289,7 +289,7 @@ def add_variables(config: od.Config) -> None:
     add_variable(
         config,
         name="nbjets_pnet_loose",
-        expression=partial(build_nbjets, which="btagPNetB", wp="loose"),
+        expression=partial(build_nbjets, config, which="btagPNetB", wp="loose"),
         aux={"inputs": build_nbjets.inputs},
         binning=(11, -0.5, 10.5),
         x_title=r"Number of b-jets (PNet loose)",
