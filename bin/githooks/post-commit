@@ -1,16 +1,19 @@
 #!/bin/sh
 
 # Custom post-commit hook that runs the linter.
+RED='\033[0;31m'
+NC='\033[0m' # No Color
 
 action() {
     # just lint
     if [ ! -d "${MULTILEPTON_BASE}" ]; then
         >&2 echo "MULTILEPTON_BASE not setup, skip linting"
     elif [ "${MULTILEPTON_SKIP_POST_COMMIT}" != "1" ]; then
-        echo "post-commit linting ..."
-        echo " Please fix the following LININTING issues (if there any) before pushing the repositry..."
         bash "${MULTILEPTON_BASE}/tests/run_linting"
-        echo
+        echo "post-commit linting ..."
+        echo -e "${RED}⚠️  Linting Issues Found${NC}"
+        echo "Please resolve the issues above (if there any!) before pushing to the repository."
+        echo ...
     fi
 
     # always end successfully
