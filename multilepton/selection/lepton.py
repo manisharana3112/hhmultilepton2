@@ -1035,7 +1035,10 @@ def lepton_selection(
                     (ak.sum(mu_veto, axis=1) == 0) &
                     (ak.sum(ch_tau_mask, axis=1) == 0)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
@@ -1063,7 +1066,10 @@ def lepton_selection(
                     (ak.sum(e_veto, axis=1) == 0) &
                     (ak.sum(ch_tau_mask, axis=1) == 0)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_muon_mask = sel_muon_mask | (ok & mu_ctrl)
@@ -1092,7 +1098,10 @@ def lepton_selection(
                     (ak.sum(mu_veto, axis=1) == 1) &
                     (ak.sum(ch_tau_mask, axis=1) == 0)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
@@ -1135,7 +1144,10 @@ def lepton_selection(
                     (ak.sum(mu_veto, axis=1) == 2) &
                     (ak.sum(ch_tau_mask, axis=1) == 0)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
@@ -1177,7 +1189,10 @@ def lepton_selection(
                     (ak.sum(mu_veto, axis=1) == 0) &
                     (ak.sum(ch_tau_mask, axis=1) == 0)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
@@ -1205,7 +1220,10 @@ def lepton_selection(
                     (ak.sum(e_veto, axis=1) == 0) &
                     (ak.sum(ch_tau_mask, axis=1) == 0)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_muon_mask = sel_muon_mask | (ok & mu_ctrl)
@@ -1234,7 +1252,10 @@ def lepton_selection(
                     (ak.sum(mu_veto, axis=1) == 1) &
                     (ak.sum(ch_tau_mask, axis=1) == 0)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
@@ -1277,7 +1298,10 @@ def lepton_selection(
                     (ak.sum(mu_veto, axis=1) == 2) &
                     (ak.sum(ch_tau_mask, axis=1) == 0)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
@@ -1320,7 +1344,10 @@ def lepton_selection(
                     (ak.sum(mu_veto, axis=1) == 3) &
                     (ak.sum(ch_tau_mask, axis=1) == 0)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
@@ -1369,7 +1396,10 @@ def lepton_selection(
                     (ak.sum(mu_veto, axis=1) == 0) &
                     (ak.sum(ch_tau_mask, axis=1) == 1)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
@@ -1415,7 +1445,10 @@ def lepton_selection(
                     (ak.sum(mu_veto, axis=1) == 0) &
                     (ak.sum(ch_tau_mask, axis=1) == 2)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
@@ -1463,7 +1496,10 @@ def lepton_selection(
                     (ak.sum(mu_veto, axis=1) == 0) &
                     (ak.sum(ch_tau_mask, axis=1) == 3)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
@@ -1509,7 +1545,10 @@ def lepton_selection(
                     (ak.sum(e_veto, axis=1) == 0) &
                     (ak.sum(ch_tau_mask, axis=1) == 1)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_muon_mask = sel_muon_mask | (ok & mu_ctrl)
@@ -1556,7 +1595,10 @@ def lepton_selection(
                     (ak.sum(e_veto, axis=1) == 0) &
                     (ak.sum(ch_tau_mask, axis=1) == 2)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_muon_mask = sel_muon_mask | (ok & mu_ctrl)
@@ -1604,7 +1646,10 @@ def lepton_selection(
                     (ak.sum(e_veto, axis=1) == 0) &
                     (ak.sum(ch_tau_mask, axis=1) == 3)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_muon_mask = sel_muon_mask | (ok & mu_ctrl)
@@ -1651,7 +1696,10 @@ def lepton_selection(
                     (ak.sum(mu_veto, axis=1) == 1) &
                     (ak.sum(ch_tau_mask, axis=1) == 1)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
@@ -1719,7 +1767,10 @@ def lepton_selection(
                     (ak.sum(mu_veto, axis=1) == 2) &
                     (ak.sum(ch_tau_mask, axis=1) == 1)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
@@ -1787,7 +1838,10 @@ def lepton_selection(
                     (ak.sum(mu_veto, axis=1) == 1) &
                     (ak.sum(ch_tau_mask, axis=1) == 2)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
@@ -1855,7 +1909,10 @@ def lepton_selection(
                     (ak.sum(e_veto, axis=1) == 0) &
                     (ak.sum(ch_tau_mask, axis=1) == 4)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_tau_mask = sel_tau_mask | (ok & ch_tau_mask)
@@ -1891,7 +1948,10 @@ def lepton_selection(
                     (ak.sum(mu_veto, axis=1) == 0) &
                     (ak.sum(ch_tau_mask, axis=1) <= 1)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
@@ -1928,7 +1988,10 @@ def lepton_selection(
                     (ak.sum(e_veto, axis=1) == 0) &
                     (ak.sum(ch_tau_mask, axis=1) <= 1)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_muon_mask = sel_muon_mask | (ok & mu_ctrl)
@@ -1966,7 +2029,10 @@ def lepton_selection(
                     (ak.sum(mu_veto, axis=1) == 1) &
                     (ak.sum(ch_tau_mask, axis=1) <= 1)
                 )
-                base_ok = base_ok & fired
+                disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
+                if not disable_triggers:
+                    base_ok = base_ok and fired
+
                 ok = ak.where(base_ok, ok, False)
 
                 sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
