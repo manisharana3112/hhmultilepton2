@@ -3,7 +3,7 @@
 **Table of contents**
 - [Introduction](#introduction)
 - [Installation (first time)](#first-time-setup)
-- [Submodules Management Guide (Columnflow and cmsdb)](submodules-management-guide-columnflow-and-cmsdb)
+- [Submodules Management Guide (Columnflow and cmsdb)](#submodules-management-guide-columnflow-and-cmsdb)
 - [Usage](#usage)
 - [Useful links](#useful-links)
 - [Contributors](#contributors)
