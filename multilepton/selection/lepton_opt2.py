@@ -18,7 +18,6 @@ from columnflow.columnar_util import (
 from columnflow.util import maybe_import
 
 from multilepton.util import IF_NANO_V9, IF_NANO_GE_V10, IF_NANO_V12, IF_NANO_V14, IF_NANO_V15
-from multilepton.selection.muon_mva import compute_muon_mva_score
 from multilepton.config.util import Trigger
 
 np = maybe_import("numpy")
@@ -290,21 +289,12 @@ def muon_selection(
         #    min_pt = 23.0 if is_single else 20.0
         # else:
         #    min_pt = 26.0 if is_single else 22.0
-        # Compute custom muon MVA score (trained tLepton MVA model)
-        try:
-            promptMVA = compute_muon_mva_score(events)
-            logger.info("Using CUSTOM TRAINED muon MVA for selection")
-        except Exception as e:
-            # Fallback to NanoAOD MVA if custom model fails
-            logger.warning(f"Failed to load custom muon MVA model ({e}), falling back to NanoAOD MVA")
-            if "promptMVA" in events.Muon.fields:
-                # >= nano v14
-                promptMVA = events.Muon.promptMVA
-                logger.info("Using NanoAOD promptMVA (v14+)")
-            else:
-                # nano <v14
-                promptMVA = events.Muon.mvaTTH
-                logger.info("Using NanoAOD mvaTTH (v<14)")
+        if "promptMVA" in events.Muon.fields:
+            # >= nano v14
+            promptMVA = events.Muon.promptMVA
+        else:
+            # nano <v14
+            promptMVA = events.Muon.mvaTTH
 
         closestjet_indicies = events.Muon.jetIdx[:, :]
         bad_indicies = (closestjet_indicies == -1)  # set btag to 0 if no closest jet
@@ -548,11 +538,50 @@ def tau_trigger_matching(
     return matches
 
 
+def gen_match_leptons(
+    reco_leptons: ak.Array,
+    gen_particles: ak.Array,
+    pdg_id: int,
+    delta_r_threshold: float = 0.1,
+) -> ak.Array:
+    """
+    Match reconstructed leptons to generator-level particles.
+    Returns a boolean mask with same shape as reco_leptons indicating if each lepton matched a gen particle.
+    
+    Args:
+        reco_leptons: Reconstructed leptons (electrons or muons)
+        gen_particles: GenPart collection
+        pdg_id: PDG ID to match (11 for electrons, 13 for muons, 15 for taus)
+        delta_r_threshold: Maximum deltaR for matching
+    
+    Returns:
+        Boolean mask with shape of reco_leptons indicating which matched to gen
+    """
+    # Filter gen particles by PDG ID (include both particle and antiparticle)
+    gen_filtered = gen_particles[np.abs(gen_particles.pdgId) == pdg_id]
+    
+    # Handle events with no matching gen particles
+    if ak.count(gen_filtered.pt, axis=1).size == 0:
+        return full_like(reco_leptons.pt, False, dtype=bool)
+    
+    # Compute deltaR between all reco and gen combinations
+    # metric_table returns shape (n_events, n_reco, n_gen)
+    delta_r = reco_leptons.metric_table(gen_filtered)
+    
+    # Check if each reco lepton has at least one gen match within threshold
+    # min over gen axis -> (n_events, n_reco)
+    min_dr = ak.min(delta_r, axis=2, keepdims=False)
+    matched = min_dr < delta_r_threshold
+    
+    return matched
+
+
 @selector(
     uses={
         electron_selection, electron_trigger_matching, muon_selection, muon_trigger_matching,
         tau_selection, tau_trigger_matching,
         "event", "{Electron,Muon,Tau}.{charge,mass}",
+        "GenPart.{pt,eta,phi,pdgId,status,genPartIdxMother}",
     },
     produces={
         electron_selection, electron_trigger_matching, muon_selection, muon_trigger_matching,
@@ -561,7 +590,10 @@ def tau_trigger_matching(
         "channel_id", "leptons_os", "tau2_isolated", "single_triggered", "cross_triggered",
         "matched_trigger_ids", "tight_sel", "trig_match", "tight_sel_bdt", "trig_match_bdt", "ok_bdt_eormu",
         "ok_bdt_eormu_bveto", "ElectronLoose", "ElectronTight", "MuonLoose", "MuonTight",
-        "TauIso", "TauNoID", "Muon.muonLeptoMVA_hh",
+        "TauIso", "TauNoID",
+        # gen-matching columns
+        "ElectronGenMatched", "MuonGenMatched", "TauGenMatched",
+        "all_leptons_genuine",
     },
 )
 def lepton_selection(
@@ -583,15 +615,6 @@ def lepton_selection(
         name: self.config_inst.get_channel(name)
         for name in self.config_inst.x.channel_names
     }
-
-    # Compute and add custom muon MVA scores as output column
-    try:
-        muon_mva_scores = compute_muon_mva_score(events)
-        events = set_ak_column(events, ("Muon", "muonLeptoMVA_hh"), muon_mva_scores)
-        print("✅ Using CUSTOM TRAINED muon Lepton MVA (XGBoost model from Lepton-MVA-Run3)")
-    except Exception as e:
-        print(f"❌ Failed to compute custom muon MVA ({e}), creating dummy column with zeros")
-        events = set_ak_column(events, ("Muon", "muonLeptoMVA_hh"), ak.zeros_like(events.Muon.pt))
 
     # prepare vectors for output vectors
     false_mask = (abs(events.event) < 0)
@@ -615,6 +638,12 @@ def lepton_selection(
     sel_tau_mask = full_like(events.Tau.pt, False, dtype=bool)
     sel_isotau_mask = full_like(events.Tau.pt, False, dtype=bool)
     sel_noid_tau_mask = full_like(events.Tau.pt, False, dtype=bool)
+    
+    # Initialize gen-matching masks
+    electron_gen_matched = full_like(events.Electron.pt, False, dtype=bool)
+    muon_gen_matched = full_like(events.Muon.pt, False, dtype=bool)
+    tau_gen_matched = full_like(events.Tau.pt, False, dtype=bool)
+    all_leptons_genuine = false_mask
     leading_taus = events.Tau[:, :0]
     matched_trigger_ids = []
     lepton_part_trigger_ids = []
@@ -1143,6 +1172,22 @@ def lepton_selection(
 
                 trig_match_ok = base_ok & (ak.sum(e_match & e_ctrl, axis=1) >= 1)
                 trig_match = trig_match | trig_match_ok
+
+                # Gen-matching for 4e channel
+                # Match selected electrons to gen electrons (PDG ID = 11)
+                e_ctrl_electrons = events.Electron[e_ctrl]
+                e_gen_matched = gen_match_leptons(e_ctrl_electrons, events.GenPart, pdg_id=11, delta_r_threshold=0.1)
+                
+                # Update the global gen-matching mask for electrons that were selected in this channel
+                electron_gen_matched = electron_gen_matched | (ok & e_ctrl & e_gen_matched)
+                
+                # Check if all 4 selected electrons in this event are genuine
+                all_matched_in_event = ak.all(e_gen_matched, axis=1)
+                all_leptons_genuine = ak.where(
+                    ok,
+                    all_leptons_genuine | all_matched_in_event,
+                    all_leptons_genuine
+                )
 
                 single_triggered = ak.where(trig_match_ok, True, single_triggered)
                 ids = ak.where(trig_match_ok, np.float32(tid), np.float32(np.nan))
@@ -2014,6 +2059,17 @@ def lepton_selection(
     # new selections for the physical channels
     events = set_ak_column(events, "tight_sel", tight_sel)
     events = set_ak_column(events, "trig_match", trig_match)
+
+    # gen-matching columns
+    electron_gen_matched = ak.fill_none(electron_gen_matched, False)
+    muon_gen_matched = ak.fill_none(muon_gen_matched, False)
+    tau_gen_matched = ak.fill_none(tau_gen_matched, False)
+    all_leptons_genuine = ak.fill_none(all_leptons_genuine, False)
+    
+    events = set_ak_column(events, "ElectronGenMatched", electron_gen_matched)
+    events = set_ak_column(events, "MuonGenMatched", muon_gen_matched)
+    events = set_ak_column(events, "TauGenMatched", tau_gen_matched)
+    events = set_ak_column(events, "all_leptons_genuine", all_leptons_genuine)
 
     # convert lepton masks to sorted indices (pt for e/mu, iso for tau)
     sel_electron_indices = sorted_indices_from_mask(sel_electron_mask, events.Electron.pt, ascending=False)

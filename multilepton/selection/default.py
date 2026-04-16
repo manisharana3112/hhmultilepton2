@@ -33,6 +33,8 @@ import multilepton.production.processes as process_producers
 
 from multilepton.selection.trigger import trigger_selection
 from multilepton.selection.lepton import lepton_selection
+from multilepton.selection.gen_selector_based_on_channel_0 import gen_matching_selection
+from multilepton.selection.gen_hh_selector import hh_truth_selector
 from multilepton.selection.jet import jet_selection
 from multilepton.production.btag import btag_weights_deepjet, btag_weights_pnet
 from multilepton.production.features import cutflow_features
@@ -81,7 +83,7 @@ def get_bad_events(self: Selector, events: ak.Array) -> ak.Array:
 @selector(
     uses={
         process_ids, json_filter, met_filters,
-        trigger_selection, lepton_selection, jet_selection,
+        trigger_selection, lepton_selection, gen_matching_selection,hh_truth_selector, jet_selection,
         mc_weight, pu_weight, ps_weights, btag_weights_deepjet,
         cutflow_features, attach_coffea_behavior, patch_ecalBadCalibFilter,
         IF_RUN_3_NOT_NANO_V15(jet_veto_map), IF_RUN_3(btag_weights_pnet),
@@ -89,7 +91,7 @@ def get_bad_events(self: Selector, events: ak.Array) -> ak.Array:
     },
     produces={
         process_ids, cutflow_features, IF_RUN_3(btag_weights_pnet),
-        trigger_selection, lepton_selection, jet_selection,
+        trigger_selection, lepton_selection, gen_matching_selection,hh_truth_selector, jet_selection,
         mc_weight, pu_weight, ps_weights, btag_weights_deepjet,
         IF_DATASET_HAS_LHE_WEIGHTS(pdf_weights, murmuf_weights),
     },
@@ -138,9 +140,17 @@ def default(
     events, trigger_results = self[trigger_selection](events, **kwargs)
     results += trigger_results
 
+    # HH truth selector (find Higgs bosons) - INDEPENDENT, runs before lepton selection
+    events, hh_results = self[hh_truth_selector](events, **kwargs)
+    results += hh_results
+
     # lepton selection
     events, lepton_results = self[lepton_selection](events, trigger_results, **kwargs)
     results += lepton_results
+
+    # gen-matching selection (match selected leptons to generator level) - DEPENDENT on lepton_selection
+    events, gen_matching_results = self[gen_matching_selection](events, **kwargs)
+    results += gen_matching_results
 
     # jet selection
     events, jet_results = self[jet_selection](events, trigger_results, lepton_results, **kwargs)

@@ -125,5 +125,6 @@ for module, name, cid in datasets:
         campaign_attr=f"campaign_{module.split('.')[-1]}",
         config_name=name,
         config_id=cid,
-        add_limited=False,
+        add_limited=True,
+        limit_dataset_files=1,
     )

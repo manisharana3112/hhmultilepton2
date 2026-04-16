@@ -1187,6 +1187,8 @@ def add_config(
             "TauNoID.*",
             "TauIso.*",
             "GenPart*",
+            "GenVisTau.*",
+            "GenJet.*",
             f"{cfg.x.met_name}.{{pt,phi,significance,covXX,covXY,covYY}}",
             "PV.npvs",
             "HLT.*",
