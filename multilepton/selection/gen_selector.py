@@ -177,10 +177,23 @@ def gen_matching_selection(
     # ── B-jet veto (same working points as categorization/default.py) ─────────
     # passes_bveto = True when the event would pass the b-veto used in the SR:
     #   nLooseBjets < 2  AND  nMediumBjets < 1
-    wp_loose = self.config_inst.x.btag_working_points["particleNet"]["loose"]    # FIX E221
-    wp_medium = self.config_inst.x.btag_working_points["particleNet"]["medium"]  # FIX E221
-    tagged_loose = events.Jet.btagPNetB > wp_loose                               # FIX E221
-    tagged_medium = events.Jet.btagPNetB > wp_medium
+    # B-tagger selection depends on year (same as categorization/default.py)
+    year = self.config_inst.campaign.x.year
+
+    if year in {2024, 2025, 2026}:
+        btag_tagger = "UParTAK4"
+        btag_discriminator = "btagUParTAK4B"
+    else:
+        btag_tagger = "particleNet"
+        btag_discriminator = "btagPNetB"
+
+    wp_loose = self.config_inst.x.btag_working_points[btag_tagger]["loose"]
+    wp_medium = self.config_inst.x.btag_working_points[btag_tagger]["medium"]
+
+    btag_score = events.Jet[btag_discriminator]
+
+    tagged_loose = btag_score > wp_loose
+    tagged_medium = btag_score > wp_medium
     passes_bveto = (ak.sum(tagged_loose, axis=1) < 2) & (ak.sum(tagged_medium, axis=1) < 1)
 
     # Store columns

@@ -188,13 +188,12 @@ def get_cone_pt_from_jetidx(
 
     return cone_pt
 
-
 @selector(
     uses={
         "Electron.{pt,eta,phi,dxy,dz}",
-        "Electron.{pfRelIso03_all,seediEtaOriX,seediPhiOriY,sip3d,miniPFRelIso_all,sieie}",
-        "Electron.{hoe,eInvMinusPInv,convVeto,lostHits,jetPtRelv2,jetIdx}",
-        "Jet.{pt,eta,phi,btagPNetB,btagUParTAK4B}",
+        "Electron.{pfRelIso03_all,seediEtaOriX,seediPhiOriY,sip3d,miniPFRelIso_all,miniPFRelIso_chg,sieie}",
+        "Electron.{hoe,eInvMinusPInv,convVeto,lostHits,jetPtRelv2,jetIdx,jetNDauCharged}",
+        "Jet.{pt,eta,phi,btagPNetB,btagUParTAK4B,btagDeepFlavB}",
         IF_NANO_V12("Electron.mvaTTH"),
         IF_NANO_V14("Electron.promptMVA"),
         IF_NANO_V15("Electron.promptMVA"),
@@ -203,6 +202,7 @@ def get_cone_pt_from_jetidx(
     },
     exposed=False,
 )
+
 def electron_selection(
     self: Selector,
     events: ak.Array,
@@ -250,13 +250,25 @@ def electron_selection(
     # Options:
     #   "custom"  - XGBoost trained model from Lepton-MVA-Run3/models
     #   "nanoaod" - Default NanoAOD MVA (promptMVA for v14+, mvaTTH for v<14)
-    electron_mva_source = getattr(self.config_inst.x, "electron_mva_source", "nanoaod")
+    electron_mva_source = getattr(self.config_inst.x, "electron_mva_source", "custom")
 
+    # Select electron MVA based on configured source
     # Select electron MVA based on configured source
     if electron_mva_source == "custom":
         # Try to use custom trained XGBoost model
         try:
             promptMVA = compute_electron_mva_score(events)
+
+            # ── print run/lumi/event/pt/eta/score per electron ────────────────
+            el_pt  = ak.flatten(events.Electron.pt)
+            el_eta = ak.flatten(events.Electron.eta)
+            run_b, lumi_b, evt_b = ak.broadcast_arrays(
+                events.run, events.luminosityBlock, events.event, events.Electron.pt,
+            )[0:3]
+            el_run  = ak.to_numpy(ak.flatten(run_b))
+            el_lumi = ak.to_numpy(ak.flatten(lumi_b))
+            el_evt  = ak.to_numpy(ak.flatten(evt_b))
+            sc_flat = ak.to_numpy(ak.flatten(promptMVA))
 
         except Exception as e:
             # Fallback to NanoAOD MVA if custom model fails
@@ -279,9 +291,51 @@ def electron_selection(
             promptMVA = events.Electron.mvaTTH
             logger.info("Using NanoAOD mvaTTH (v<14) for electron selection")
 
-    else:
-        raise ValueError(f"Invalid electron_mva_source '{electron_mva_source}'. "
-                       f"Choose from: 'custom' (XGBoost model), 'nanoaod' (version-based default)")
+        # ── print run/lumi/event/pt/eta/score per electron (score > 0.3) ──────
+        el_pt  = ak.flatten(events.Electron.pt)
+        el_eta = ak.flatten(events.Electron.eta)
+        run_b, lumi_b, evt_b = ak.broadcast_arrays(
+            events.run, events.luminosityBlock, events.event, events.Electron.pt,
+        )[0:3]
+        el_run  = ak.to_numpy(ak.flatten(run_b))
+        el_lumi = ak.to_numpy(ak.flatten(lumi_b))
+        el_evt  = ak.to_numpy(ak.flatten(evt_b))
+        sc_flat = ak.to_numpy(ak.flatten(promptMVA))
+
+    if getattr(self, "shift_inst", None) is None or self.shift_inst.is_nominal:
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # UNCONDITIONAL COMPARISON -- runs regardless of electron_mva_source.
+        # Always computes BOTH custom and NanoAOD scores independently, just to
+        # log a pass-count comparison @ 0.3. Does not affect `promptMVA` used
+        # for the actual selection above/below.
+        # ═══════════════════════════════════════════════════════════════════════
+        try:
+            custom_score = compute_electron_mva_score(events)
+            custom_flat  = ak.to_numpy(ak.flatten(custom_score))
+            logger.info(
+                f"[Comparison] Electron custom MVA raw score stats: "
+                f"min={custom_flat.min():.4f} max={custom_flat.max():.4f} mean={custom_flat.mean():.4f}"
+            )
+        except Exception as cmp_e:
+            logger.warning(f"[Comparison] Could not compute custom electron MVA ({cmp_e})")
+            custom_flat = None
+
+        if "promptMVA" in events.Electron.fields:
+            nano_flat = ak.to_numpy(ak.flatten(events.Electron.promptMVA))
+        else:
+            nano_flat = ak.to_numpy(ak.flatten(events.Electron.mvaTTH))
+
+        if custom_flat is not None:
+            n_pass_custom = int(np.sum(custom_flat > 0.3))
+            n_pass_nano   = int(np.sum(nano_flat > 0.3))
+            n_total       = len(nano_flat)
+
+            logger.info(
+                f"[Comparison] Electron MVA @ 0.3 -- "
+                f"custom={n_pass_custom}/{n_total}  nanoaod={n_pass_nano}/{n_total}"
+            )
+    
 
     # default electron mask
     tight_mask = None
@@ -413,8 +467,10 @@ def electron_trigger_matching(
 @selector(
     uses={
         "Muon.{pt,eta,phi,looseId,mediumId,tightId}",
-        "Muon.{pfRelIso04_all,dxy,dz,sip3d,miniPFRelIso_all,jetPtRelv2,jetIdx}",
-        "Jet.{pt,eta,phi,btagPNetB,btagUParTAK4B}",
+        "Muon.{pfRelIso04_all,pfRelIso03_all,dxy,dz,sip3d,miniPFRelIso_all,miniPFRelIso_chg}",
+        "Muon.{jetPtRelv2,jetIdx,jetNDauCharged}",
+        "Muon.{segmentComp,isTracker,isGlobal,nStations}",
+        "Jet.{pt,eta,phi,btagPNetB,btagUParTAK4B,btagDeepFlavB}",
         IF_NANO_V12("Muon.mvaTTH"),
         IF_NANO_V14("Muon.promptMVA"),
         IF_NANO_V15("Muon.promptMVA"),
@@ -454,7 +510,7 @@ def muon_selection(
     # Options:
     #   "custom"  - XGBoost trained model from Lepton-MVA-Run3/models
     #   "nanoaod" - Default NanoAOD MVA (promptMVA for v14+, mvaTTH for v<14)
-    muon_mva_source = getattr(self.config_inst.x, "muon_mva_source", "nanoaod")
+    muon_mva_source = getattr(self.config_inst.x, "muon_mva_source", "custom")
 
     # default muon mask
     tight_mask = None
@@ -471,6 +527,16 @@ def muon_selection(
             try:
                 promptMVA = compute_muon_mva_score(events)
 
+                # ── print run/lumi/event/pt/eta/score per muon ─────────────────────
+                mu_pt  = ak.flatten(events.Muon.pt)
+                mu_eta = ak.flatten(events.Muon.eta)
+                run_b, lumi_b, evt_b = ak.broadcast_arrays(
+                    events.run, events.luminosityBlock, events.event, events.Muon.pt,
+                )[0:3]
+                mu_run  = ak.to_numpy(ak.flatten(run_b))
+                mu_lumi = ak.to_numpy(ak.flatten(lumi_b))
+                mu_evt  = ak.to_numpy(ak.flatten(evt_b))
+                sc_flat = ak.to_numpy(ak.flatten(promptMVA))
             except Exception as e:
                 # Fallback to NanoAOD MVA if custom model fails
                 logger.warning(f"Failed to load custom muon MVA model ({e}), falling back to NanoAOD MVA")
@@ -482,19 +548,55 @@ def muon_selection(
                     logger.info("Using NanoAOD mvaTTH (v<14) as fallback")
 
         elif muon_mva_source == "nanoaod":
-            # Use NanoAOD default MVA based on version
             if "promptMVA" in events.Muon.fields:
-                # >= nano v14
                 promptMVA = events.Muon.promptMVA
-                logger.info("Using NanoAOD promptMVA (v14+)")
+                logger.info("Using NanoAOD promptMVA (v14+) for muon selection")
             else:
-                # nano <v14
                 promptMVA = events.Muon.mvaTTH
-                logger.info("Using NanoAOD mvaTTH (v<14)")
+                logger.info("Using NanoAOD mvaTTH (v<14) for muon selection")
 
+            # ── print run/lumi/event/pt/eta/score per muon (score > 0.5) ──────────
+            mu_pt  = ak.flatten(events.Muon.pt)
+            mu_eta = ak.flatten(events.Muon.eta)
+            run_b, lumi_b, evt_b = ak.broadcast_arrays(
+                events.run, events.luminosityBlock, events.event, events.Muon.pt,
+            )[0:3]
+            mu_run  = ak.to_numpy(ak.flatten(run_b))
+            mu_lumi = ak.to_numpy(ak.flatten(lumi_b))
+            mu_evt  = ak.to_numpy(ak.flatten(evt_b))
+            sc_flat = ak.to_numpy(ak.flatten(promptMVA))
+    if getattr(self, "shift_inst", None) is None or self.shift_inst.is_nominal:
+        # ═══════════════════════════════════════════════════════════════════════
+        # UNCONDITIONAL COMPARISON -- runs regardless of muon_mva_source.
+        # Always computes BOTH custom and NanoAOD scores independently, just to
+        # log a pass-count comparison @ 0.5. Does not affect `promptMVA` used
+        # for the actual selection above/below.
+        # ═══════════════════════════════════════════════════════════════════════
+        try:
+            custom_score_mu = compute_muon_mva_score(events)
+            custom_flat_mu  = ak.to_numpy(ak.flatten(custom_score_mu))
+            logger.info(
+                f"[Comparison] Muon custom MVA raw score stats: "
+                f"min={custom_flat_mu.min():.4f} max={custom_flat_mu.max():.4f} mean={custom_flat_mu.mean():.4f}"
+            )
+        except Exception as cmp_e:
+            logger.warning(f"[Comparison] Could not compute custom muon MVA ({cmp_e})")
+            custom_flat_mu = None
+
+        if "promptMVA" in events.Muon.fields:
+            nano_flat_mu = ak.to_numpy(ak.flatten(events.Muon.promptMVA))
         else:
-            raise ValueError(f"Invalid muon_mva_source '{muon_mva_source}'. "
-                           f"Choose from: 'custom' (XGBoost model), 'nanoaod' (version-based default)")
+            nano_flat_mu = ak.to_numpy(ak.flatten(events.Muon.mvaTTH))
+
+        if custom_flat_mu is not None:
+            n_pass_custom_mu = int(np.sum(custom_flat_mu > 0.5))
+            n_pass_nano_mu    = int(np.sum(nano_flat_mu > 0.5))
+            n_total_mu        = len(nano_flat_mu)
+
+            logger.info(
+                f"[Comparison] Muon MVA @ 0.5 -- "
+                f"custom={n_pass_custom_mu}/{n_total_mu}  nanoaod={n_pass_nano_mu}/{n_total_mu}"
+            )
 
         closestjet_indicies = events.Muon.jetIdx[:, :]
         bad_indicies = (closestjet_indicies == -1)  # set btag to 0 if no closest jet
