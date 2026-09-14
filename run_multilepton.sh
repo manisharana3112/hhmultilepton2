@@ -1,55 +1,105 @@
 #!/usr/bin/env bash
 
-task=cf.ReduceEvents
-task=cf.PlotVariables1D
-task=cf.ProvideReducedEvents
-task=cf.GetDatasetLFNs
-task=cf.SelectEvents
+export MVA_FEATURE_DEBUG=1
+#export MVA_ZERO_JETPTRELV2=1
+
+#task=cf.GetDatasetLFNs
+#task=cf.CalibrateEvents
+#task=cf.SelectEvents
+#task=cf.ReduceEvents
+#task=cf.ProduceColumns
+task=cf.CreateYieldTable
+#task=cf.PlotVariables1D
+
+version=test_4
+limit_dataset_files=1   # -1 to process all files
+parallel_jobs=300		
+workflow=local          # choices: local, slurm, htcondor
+producers=default
+selector=default
+calibrators=default
+_shift=nominal
+categories=c4mu,c3mu1tau,c2mu2tau
+variables=nmu
+
+#config=22preEE_v14_private
+#config=22postEE_v14_private
+config=23preBPix_v14_private
+#config=23postBPix_v14_private
+#config=22preEE_v12_central
+#config=22postEE_v12_central
+#config=23preBPix_v12_central
+#config=23postBPix_v12_central
+#config=24_v15_central
 
 requested_datasets=(
- data_mu_e
- qcd_mu_pt20to30_pythia
- wmh_wqq_hbb_powheg
+hh_ggf_htt_hvv_kl1_kt1_powheg
 )
-requested_datasets_not_now=(
- qcd_mu_pt30to50_pythia
- qcd_mu_pt50to80_pythia
- qcd_mu_pt80to120_pythia
- qcd_mu_pt120to170_pythia
- qcd_mu_pt170to300_pythia
- qcd_mu_pt300to470_pythia
- qcd_mu_pt470to600_pythia
- qcd_mu_pt600to800_pythia
- qcd_mu_pt800to1000_pythia
- qcd_mu_pt1000toinf_pythia
+not_now_requested_datasets=(
+hh_ggf_htt_htt_kl1_kt1_powheg
+qcd_mu_pt30to50_pythia
+qcd_mu_pt50to80_pythia
+qcd_mu_pt80to120_pythia
+qcd_mu_pt1000toinf_pythia
+qcd_mu_pt120to170_pythia
+qcd_mu_pt170to300_pythia
+qcd_mu_pt300to470_pythia
+qcd_mu_pt470to600_pythia
+qcd_mu_pt600to800_pythia
+qcd_mu_pt800to1000_pythia
 )
 
-for dataset in ${requested_datasets[*]}; do 
-    law run ${task} \
-        --version fixbranches_divergence_from_master_1 \
-        --config 24_v15_central \
-        --dataset $dataset \
+plus_args=""
+
+# Arguments only needed for plotting/yield tables
+if [[ "$task" == "cf.PlotVariables1D" || "$task" == "cf.CreateYieldTable" ]]; then
+    plus_args+=" --producers ${producers}"
+    plus_args+=" --categories ${categories}"
+    
+    # need to enforce previous tasks to the same limit_dataset_files
+    cf_tasks=( cf.GetDatasetLFNs cf.CalibrateEvents cf.SelectEvents cf.ReduceEvents cf.ProduceColumns
+    )
+    for cft in "${cf_tasks[@]}"; do
+        plus_args+=" --${cft}-limit-dataset-files ${limit_dataset_files}"
+    done
+    
+    # variables to plots with shift up/down/nominal
+    if [[ "$task" == "cf.PlotVariables1D" ]]; then
+        plus_args+=" --variables ${variables}"
+        plus_args+=" --shift ${_shift}"
+    fi
+
+else
+    plus_args+=" --limit-dataset-files ${limit_dataset_files}"
+    plus_args+=" --shift ${_shift}"
+fi
+    
+
+# Arguments only for batch workflows
+if [[ "$workflow" == "slurm" || "$workflow" == "htcondor" ]]; then
+    parallel_jobs=${parallel_jobs:-4}
+    plus_args+=" --parallel-jobs ${parallel_jobs}"
+fi
+
+
+for dataset in "${requested_datasets[@]}"; do
+    echo " working on ..."
+    set -x
+    law run "${task}" \
+        --config "${config}" \
+        --dataset "${dataset}" \
+        --workflow "${workflow}" \
+        --version "${version}" \
+        --selector "${selector}" \
+        --calibrators "${calibrators}" \
         --retries 1 \
+        --workers 1 \
         --clear-logs \
         --cleanup-jobs \
-        --limit-dataset-files 1 \
-        ${1} 
+        ${plus_args} \
+        "$@"
+    set +x
 done
-    
-    # --parallel-jobs 300 \
-    # --workflow slurm \
-    # --branch 0 \
-    # --producers default \
-    # --variables nmu \
-    # --categories ceormu \
-    # --view-cmd imgcat \
-    # --remove-output 10 \
-    # --workers 1 \
-
-    # FIXME to test out the functionality of these
-    # --log-file slurm
-    # --pilot 
-
 
 # options: 
 #   --configs: 

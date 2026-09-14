@@ -29,14 +29,23 @@ def hh_truth_selector(
     events: ak.Array,
     **kwargs,
 ) -> tuple[ak.Array, SelectionResult]:
-    logger.info("Running GEN HH SELECTOR")
+
+    # Run only for MC
+    if not self.dataset_inst.is_mc:
+        return events, SelectionResult(
+            steps={
+                "hh_truth": full_like(events.event, True, dtype=bool),
+            },
+        )
+
+    logger.info_once("Running GenPart hh_truth_selector ...")
 
     gen = events.GenPart
 
     # ---------------------------------------------------------
     # Identify Higgs bosons
     # ---------------------------------------------------------
-    
+
     higgs = gen[np.abs(gen.pdgId) == 25]
     higgs_padded = ak.pad_none(higgs, 2)
 
@@ -56,17 +65,17 @@ def hh_truth_selector(
 
     # Acoplanarity
     delta_phi = np.abs(h1.phi - h2.phi)
-    delta_phi = np.where(delta_phi > np.pi, 2*np.pi - delta_phi, delta_phi)
+    delta_phi = np.where(delta_phi > np.pi, 2 * np.pi - delta_phi, delta_phi)
     acoplanarity = 1.0 - delta_phi / np.pi
     acoplanarity = ak.fill_none(acoplanarity, -999.0)
 
-    # cos(theta*) approximation
-    delta_eta = h1.eta - h2.eta
-    costheta_star = np.tanh(delta_eta / 2.0)
+    # cos(theta*): angle of h1 in the HH rest frame
+    h1_boosted = h1.boostCM_of(hh_system)
+    costheta_star = np.cos(h1_boosted.theta)
     costheta_star = ak.fill_none(costheta_star, -999.0)
 
     # ---------------------------------------------------------
-    #Higgs decay classification 
+    # Higgs decay classification
     # ---------------------------------------------------------
 
     mother_idx = gen.genPartIdxMother
@@ -114,5 +123,5 @@ def hh_truth_selector(
     return events, SelectionResult(
         steps={
             "hh_truth": full_like(events.event, True, dtype=bool),
-        }
+        },
     )

@@ -19,7 +19,9 @@ from columnflow.columnar_util import (
 )
 
 from multilepton.selection.lepton import trigger_object_matching
-from multilepton.util import IF_RUN_2, IF_NOT_NANO_V15
+from multilepton.util import (
+    IF_RUN_2, IF_NOT_NANO_V15, IF_NANO_V12, IF_NANO_V14, IF_NANO_V15,
+)
 
 
 np = maybe_import("numpy")
@@ -28,15 +30,23 @@ ak = maybe_import("awkward")
 
 @selector(
     uses={
-        jet_id, fatjet_id,
-        "fired_trigger_ids", "TrigObj.{pt,eta,phi}",
-        "Jet.{pt,eta,phi,mass}", IF_NOT_NANO_V15("Jet.jetId"), IF_RUN_2("Jet.puId"),
-        "FatJet.{pt,eta,phi,mass,msoftdrop,subJetIdx1,subJetIdx2}", IF_NOT_NANO_V15("FatJet.jetId"),
-        "SubJet.{pt,eta,phi,mass}", IF_NOT_NANO_V15("SubJet.btagDeepB"),
+        "fired_trigger_ids",
+        "TrigObj.{pt,eta,phi}",
+        "Jet.{pt,eta,phi,mass}",
+        "FatJet.{pt,eta,phi,mass,msoftdrop,subJetIdx1,subJetIdx2}",
+        "SubJet.{pt,eta,phi,mass}",
+        jet_id,
+        fatjet_id,
+        IF_NOT_NANO_V15("SubJet.btagDeepB", "FatJet.jetId", "Jet.jetId"),
+        IF_RUN_2("Jet.puId"),
+        IF_NANO_V12("Jet.btagPNetB"),
+        IF_NANO_V14("Jet.btagPNetB"),
+        IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
     },
     produces={
         # hhbtag,
         "Jet.hhbtag", "matched_trigger_ids",
+        "n_btag_medium", "n_btag_tight",
     },
 )
 def jet_selection(
@@ -61,8 +71,9 @@ def jet_selection(
     li = ak.local_index(events.Jet)
 
     # recompute jet ids
-    events = self[jet_id](events, **kwargs)
-    events = self[fatjet_id](events, **kwargs)
+    if self.config_inst.x.jet_id_has_multiplicity:
+        events = self[jet_id](events, **kwargs)
+        events = self[fatjet_id](events, **kwargs)
 
     #
     # default jet selection
@@ -439,6 +450,21 @@ def jet_selection(
 
     # store some columns
     events = set_ak_column(events, "Jet.hhbtag", hhbtag_scores)
+
+    # b-tag multiplicities of the cleaned jets, computed here so that the categorizers do not
+    # depend on whether events.Jet has already been reduced to the cleaned collection
+    year = self.config_inst.campaign.x.year
+    is_upart = year in {2024, 2025, 2026}
+    btag_tagger = "UParTAK4" if is_upart else "particleNet"
+    btag_score = events.Jet["btagUParTAK4B" if is_upart else "btagPNetB"]
+    for wp_name in ("medium", "tight"):
+        wp = self.config_inst.x.btag_working_points[btag_tagger][wp_name]
+        events = set_ak_column(
+            events,
+            f"n_btag_{wp_name}",
+            ak.sum((btag_score > wp) & default_mask, axis=1),
+            value_type=np.int32,
+        )
 
     # build selection results plus new columns (src -> dst -> indices)
     result = SelectionResult(

@@ -6,6 +6,8 @@ Tau scale factor production.
 import law
 import functools
 
+logger = law.logger.get_logger(__name__)
+
 from columnflow.production import Producer, producer
 from columnflow.util import maybe_import, load_correction_set, DotDict
 from columnflow.columnar_util import set_ak_column, flat_np_view, layout_ak_array
@@ -70,9 +72,11 @@ def tau_weights(self: Producer, events: ak.Array, **kwargs) -> ak.Array:
     # define channel / trigger dependent masks
     single_triggered = events.single_triggered
     cross_triggered = events.cross_triggered
+    is_run3 = self.config_inst.campaign.x.run == 3
     dm_mask = (
         (events.Tau.decayMode == 0) |
         (events.Tau.decayMode == 1) |
+        ((events.Tau.decayMode == 2) & is_run3) |  # DM=2 only for PNet (Run 3)
         (events.Tau.decayMode == 10) |
         (events.Tau.decayMode == 11)
     )
@@ -82,6 +86,22 @@ def tau_weights(self: Producer, events: ak.Array, **kwargs) -> ak.Array:
     #
     # start with ones
     sf_nom = np.ones_like(pt, dtype=np.float32)
+
+    # PNet placeholder: return 1.0 +/- 1% for all taus
+    if getattr(self, "_pnet_placeholder", False):
+        events = set_ak_column_f32(events, "tau_weight", reduce_mul(sf_nom))
+        for direction in ["up", "down"]:
+            sign = 1.0 if direction == "up" else -1.0
+            sf_varied = sf_nom * (1.0 + sign * 0.01)
+            for unc in [
+                "jet_dm0", "jet_dm1", "jet_dm10", "e_barrel", "e_endcap",
+                "mu_0p0To0p4", "mu_0p4To0p8", "mu_0p8To1p2", "mu_1p2To1p7", "mu_1p7To2p3",
+            ]:
+                events = set_ak_column_f32(
+                    events, f"tau_weight_{unc}_{direction}", reduce_mul(sf_varied),
+                )
+        return events
+
     wp_config = self.config_inst.x.tau_trigger_working_points
 
     # helpers to create corrector arguments
@@ -204,17 +224,27 @@ def tau_weights_setup(
 ) -> None:
 
     # create the trigger and id correctors
-    tau_file = self.get_tau_file(reqs["external_files"].files)
-    correction_set = load_correction_set(tau_file)
     tagger_name = self.get_tau_tagger()
-    self.id_vs_jet_corrector = correction_set[f"{tagger_name}VSjet"]
-    self.id_vs_e_corrector = correction_set[f"{tagger_name}VSe"]
-    self.id_vs_mu_corrector = correction_set[f"{tagger_name}VSmu"]
+    if tagger_name == "PNet":
+        # TODO: PNet tau ID SFs not yet available from TauPOG
+        # Using placeholder correctors that return 1.0 +/- 1%
+        logger.warning("PNet tau ID SFs not available yet — using placeholder (1.0 +/- 1%)")
+        self.id_vs_jet_corrector = None
+        self.id_vs_e_corrector = None
+        self.id_vs_mu_corrector = None
+        self._pnet_placeholder = True
+    else:
+        tau_file = self.get_tau_file(reqs["external_files"].files)
+        correction_set = load_correction_set(tau_file)
+        self.id_vs_jet_corrector = correction_set[f"{tagger_name}VSjet"]
+        self.id_vs_e_corrector = correction_set[f"{tagger_name}VSe"]
+        self.id_vs_mu_corrector = correction_set[f"{tagger_name}VSmu"]
+        self._pnet_placeholder = False
 
-    # check versions
-    assert self.id_vs_jet_corrector.version in (0, 1, 2, 3)
-    assert self.id_vs_e_corrector.version in (0, 1)
-    assert self.id_vs_mu_corrector.version in (0, 1)
+        # check versions
+        assert self.id_vs_jet_corrector.version in (0, 1, 2, 3)
+        assert self.id_vs_e_corrector.version in (0, 1)
+        assert self.id_vs_mu_corrector.version in (0, 1)
 
 
 @producer(

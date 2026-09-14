@@ -103,6 +103,18 @@ def IF_RUN_3_22_23(self: ArrayFunction.DeferredColumn, func: ArrayFunction) -> A
     return self.get() if (func.config_inst.campaign.x.run == 3 and func.config_inst.campaign.x.year in {2022, 2023}) else None  # noqa: E501
 
 
+@deferred_column
+def IF_BTAG_SF_AVAILABLE(self: ArrayFunction.DeferredColumn, func: ArrayFunction) -> Any | set[Any]:
+    return self.get() if func.config_inst.x("btag_shape_sf_available", True) else None
+
+
+@deferred_column
+def IF_RUN_3_BTAG_SF_AVAILABLE(self: ArrayFunction.DeferredColumn, func: ArrayFunction) -> Any | set[Any]:
+    return self.get() if (
+        func.config_inst.campaign.x.run == 3 and func.config_inst.x("btag_shape_sf_available", True)
+    ) else None
+
+
 def IF_DATASET_HAS_TAG(*args, negate: bool = False, **kwargs) -> ArrayFunction.DeferredColumn:
     @deferred_column
     def deferred(

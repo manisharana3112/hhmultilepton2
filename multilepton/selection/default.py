@@ -32,14 +32,16 @@ from columnflow.types import Iterable
 import multilepton.production.processes as process_producers
 
 from multilepton.selection.trigger import trigger_selection
-from multilepton.selection.lepton import lepton_selection
+from multilepton.selection.lepton import lepton_selection, lepton_selection_ffmr
 from multilepton.selection.gen_selector import gen_matching_selection
 from multilepton.selection.gen_hh_selector import hh_truth_selector
 from multilepton.selection.jet import jet_selection
 from multilepton.production.btag import btag_weights_deepjet, btag_weights_pnet
 from multilepton.production.features import cutflow_features
 from multilepton.production.patches import patch_ecalBadCalibFilter
-from multilepton.util import IF_DATASET_HAS_LHE_WEIGHTS, IF_RUN_3, IF_RUN_3_NOT_NANO_V15
+from multilepton.util import (
+    IF_DATASET_HAS_LHE_WEIGHTS, IF_RUN_3_NOT_NANO_V15, IF_BTAG_SF_AVAILABLE, IF_RUN_3_BTAG_SF_AVAILABLE,
+)
 
 np = maybe_import("numpy")
 ak = maybe_import("awkward")
@@ -83,19 +85,21 @@ def get_bad_events(self: Selector, events: ak.Array) -> ak.Array:
 @selector(
     uses={
         process_ids, json_filter, met_filters,
-        trigger_selection, lepton_selection, gen_matching_selection,hh_truth_selector, jet_selection,
-        mc_weight, pu_weight, ps_weights, btag_weights_deepjet,
+        trigger_selection, lepton_selection, gen_matching_selection, hh_truth_selector, jet_selection,
+        mc_weight, pu_weight, ps_weights, IF_BTAG_SF_AVAILABLE(btag_weights_deepjet),
         cutflow_features, attach_coffea_behavior, patch_ecalBadCalibFilter,
-        IF_RUN_3_NOT_NANO_V15(jet_veto_map), IF_RUN_3(btag_weights_pnet),
+        IF_RUN_3_NOT_NANO_V15(jet_veto_map), IF_RUN_3_BTAG_SF_AVAILABLE(btag_weights_pnet),
         IF_DATASET_HAS_LHE_WEIGHTS(pdf_weights, murmuf_weights),
     },
     produces={
-        process_ids, cutflow_features, IF_RUN_3(btag_weights_pnet),
-        trigger_selection, lepton_selection, gen_matching_selection,hh_truth_selector, jet_selection,
-        mc_weight, pu_weight, ps_weights, btag_weights_deepjet,
+        process_ids, cutflow_features, IF_RUN_3_BTAG_SF_AVAILABLE(btag_weights_pnet),
+        trigger_selection, lepton_selection, gen_matching_selection, hh_truth_selector, jet_selection,
+        mc_weight, pu_weight, ps_weights, IF_BTAG_SF_AVAILABLE(btag_weights_deepjet),
         IF_DATASET_HAS_LHE_WEIGHTS(pdf_weights, murmuf_weights),
     },
     exposed=True,
+    # lepton selector to use, replaced by default_ffmr below
+    lepton_sel=lepton_selection,
 )
 def default(
     self: Selector,
@@ -141,16 +145,22 @@ def default(
     results += trigger_results
 
     # HH truth selector (find Higgs bosons) - INDEPENDENT, runs before lepton selection
-    events, hh_results = self[hh_truth_selector](events, **kwargs)
-    results += hh_results
+    if self.dataset_inst.is_mc:
+        events, hh_results = self[hh_truth_selector](events, **kwargs)
+        results += hh_results
 
     # lepton selection
-    events, lepton_results = self[lepton_selection](events, trigger_results, **kwargs)
+    events, lepton_results = self[self.lepton_sel](events, trigger_results, **kwargs)
     results += lepton_results
 
     # gen-matching selection (match selected leptons to generator level) - DEPENDENT on lepton_selection
-    events, gen_matching_results = self[gen_matching_selection](events, **kwargs)
-    results += gen_matching_results
+    # opt-in only: this classification (and its columns/categories) is only needed for dedicated
+    # gen-matching/fake studies, so it is skipped by default to avoid slowing down every run
+    if self.config_inst.x("enable_gen_matching_studies", False):
+        # run on both MC and data: for data, gen_matching_selection fills gen_match_category with
+        # a neutral default so downstream categorizers (cat_nonfakes/cat_fakes/...) still find it
+        events, gen_matching_results = self[gen_matching_selection](events, **kwargs)
+        results += gen_matching_results
 
     # jet selection
     events, jet_results = self[jet_selection](events, trigger_results, lepton_results, **kwargs)
@@ -178,14 +188,16 @@ def default(
         # pileup weights
         events = self[pu_weight](events, **kwargs)
 
-        # btag weights
+        # btag weights (only if shape SFs are available for this config, see
+        # cfg.x.btag_shape_sf_available in configs_multilepton.py)
         btag_weight_jet_mask = ak.fill_none(results.x.jet_mask, False, axis=-1)
-        events = self[btag_weights_deepjet](
-            events,
-            jet_mask=btag_weight_jet_mask,
-            negative_b_score_log_mode="none",
-            **kwargs,
-        )
+        if self.has_dep(btag_weights_deepjet):
+            events = self[btag_weights_deepjet](
+                events,
+                jet_mask=btag_weight_jet_mask,
+                negative_b_score_log_mode="none",
+                **kwargs,
+            )
         if self.has_dep(btag_weights_pnet):
             events = self[btag_weights_pnet](
                 events,
@@ -240,6 +252,12 @@ def default(
 
 @default.init
 def default_init(self: Selector, **kwargs) -> None:
+    # exchange the lepton selector if a different one was set
+    if self.lepton_sel is not lepton_selection:
+        for deps in (self.uses, self.produces):
+            deps.discard(lepton_selection)
+            deps.add(self.lepton_sel)
+
     # build and store derived process id producers
     for tag in ("dy", "w_lnu"):
         prod_name = f"process_ids_{tag}"
@@ -291,6 +309,10 @@ def default_setup(self: Selector, task: law.Task, **kwargs) -> None:
             },
         ),
     ]
+
+
+# same as default, but selecting the fake factor measurement regions instead of the physics channels
+default_ffmr = default.derive("default_ffmr", cls_dict={"lepton_sel": lepton_selection_ffmr})
 
 
 empty = default.derive("empty", cls_dict={})
@@ -363,14 +385,16 @@ def empty_call(
         # pileup weights
         events = self[pu_weight](events, **kwargs)
 
-        # btag weights
+        # btag weights (only if shape SFs are available for this config, see
+        # cfg.x.btag_shape_sf_available in configs_multilepton.py)
         btag_weight_jet_mask = abs(events.Jet["eta"]) < 2.5
-        events = self[btag_weights_deepjet](
-            events,
-            jet_mask=btag_weight_jet_mask,
-            negative_b_score_log_mode="none",
-            **kwargs,
-        )
+        if self.has_dep(btag_weights_deepjet):
+            events = self[btag_weights_deepjet](
+                events,
+                jet_mask=btag_weight_jet_mask,
+                negative_b_score_log_mode="none",
+                **kwargs,
+            )
         if self.has_dep(btag_weights_pnet):
             events = self[btag_weights_pnet](
                 events,

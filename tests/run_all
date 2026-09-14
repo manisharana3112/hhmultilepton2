@@ -38,6 +38,24 @@ action() {
         cecho 32 "done"
     fi
 
+    # columnflow integration tests — only run when on a machine with law/cvmfs
+    # (set CF_INTEGRATION_TESTS=1 to enable, e.g. before pushing from the cluster)
+    if [ "${CF_INTEGRATION_TESTS}" = "1" ]; then
+        cecho 35 "check columnflow analysis ..."
+        bash "${this_dir}/run_analysis"
+        ret="$?"
+        if [ "${ret}" != "0" ]; then
+            2>&1 cecho 31 "run_analysis failed with exit code ${ret}"
+            [ "${mode}" = "force" ] || return "${ret}"
+            ret_global="1"
+        else
+            cecho 32 "done"
+        fi
+    else
+        cecho 33 "skipping columnflow analysis (CF_INTEGRATION_TESTS not set)"
+    fi
+
     return "${ret_global}"
+
 }
 action "$@"

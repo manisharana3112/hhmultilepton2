@@ -143,7 +143,8 @@ def pogEraFormat(era):
 
 def localizePOGSF(era, POG, fileName):
     """Localize POG scale factor files."""
-    subdir = pogEraFormat(str(era))
+    era = str(era).replace("preEE", "").replace("preBPix", "").replace("post", "")
+    subdir = pogEraFormat(era)
     return os.path.join("/cvmfs/cms.cern.ch/rsync/cms-nanoAOD/jsonpog-integration", "POG", POG, subdir, fileName)
 
 
@@ -153,11 +154,9 @@ def nested_dict():
 
 
 # https://btv-wiki.docs.cern.ch/ScaleFactors
-def bTagWorkingPoints(year, run, campaign):
-    getfromyear = year
-    # if year == 2024:
-    #    getfromyear = 2023  # still missing FIXME once they are updated by BTV-POG
-    fileName = law.LocalFileTarget(localizePOGSF(getfromyear, "BTV", "btagging.json.gz"))
+def bTagWorkingPoints(era, run, campaign):
+    year = era[:4]
+    fileName = law.LocalFileTarget(localizePOGSF(era, "BTV", "btagging.json.gz"))
     logger.info(f"Getting btagging working points and discriminator cuts from : {fileName}")
     ceval = load_correction_set(fileName)
     btagging = nested_dict()
@@ -166,9 +165,9 @@ def bTagWorkingPoints(year, run, campaign):
         valid_eras = ["2016APV", "2016", "2017", "2018"]
     elif run == 3:
         taggers = ["deepJet", "particleNet", "robustParticleTransformer", "particleNetMD"]
-        if year == 2024:
+        if year == "2024":
             taggers = ["UParTAK4"]
-        valid_eras = ["2022", "2022EE", "2023", "2023BPix", "2024"]
+        valid_eras = ["2022", "2022EE", "2023", "2023BPix", "2024", "2025"]
     else:
         raise ValueError(f"Unsupported run: {run}")
 
@@ -245,12 +244,13 @@ def add_config(
     campaign: od.Campaign,
     config_name: str | None = None,
     config_id: int | None = None,
+    enable_gen_matching_studies: bool = False,
 ) -> od.Config:
 
     # gather campaign data
     run = campaign.x.run
     year = campaign.x.year
-
+    era = analysis_cfg.get_era(campaign)
     # --- basic configuration validations ---
     if run not in {2, 3}:
         raise ValueError(f"Invalid run: {run}. Expected 2 or 3.")
@@ -366,38 +366,76 @@ def add_config(
     def ConfigureTaus(cfg, run, campaign):
         """
         Configure tau ID, TEC (Tau Energy Calibration), and trigger settings.
+
+        Run 2: DeepTau with integer WP IDs (idDeepTau...VS{jet,e,mu} columns).
+        Run 3: PNet with raw float score thresholds (rawPNetVS{jet,e,mu} columns).
         """
         tau_taggers = {
             2: "DeepTau2017v2p1",
-            3: "DeepTau2018v2p5",
+            3: "PNet",
         }
 
         cfg.x.tau_tagger = tau_taggers.get(run)
-        corrector_kwargs = {"wp": "Medium", "wp_VSe": "VVLoose"} if run == 3 else {}
-        cfg.x.tec = TECConfig(tagger=cfg.x.tau_tagger, corrector_kwargs=corrector_kwargs)
+
+        # TEC (Tau Energy Calibration)
+        # TODO: update to PNet TEC corrector once available from TauPOG.
+        # For Run 3: cfg.x.tec must be set (the default calibrator always initialises it),
+        # but no PNet TEC corrector exists yet. We use the DeepTau2018v2p5 corrector as a
+        # placeholder with wp="Tight"/wp_VSe="VVLoose" — the only wp_VSe values that exist
+        # in the 2023 corrector JSON ("VLoose", "Loose", "Medium" are absent and crash).
+        # These corrections are a small O(few-%) effect on genuine tau pt/mass and are
+        # acceptable as a placeholder until TauPOG ships the PNet TEC JSON.
+        if run == 3:
+            corrector_kwargs = {"wp": "Tight", "wp_VSe": "VVLoose"}
+            cfg.x.tec = TECConfig(tagger="DeepTau2018v2p5", corrector_kwargs=corrector_kwargs)
+        else:
+            corrector_kwargs = {}
+            cfg.x.tec = TECConfig(tagger=cfg.x.tau_tagger, corrector_kwargs=corrector_kwargs)
 
         # --- Tau ID working points
-        # Legacy (campaign.x.version < 10) vs New format (>=10)
-        if campaign.x.version < 10:
-            wp_values_mu = {"vloose": 1, "loose": 2, "medium": 4, "tight": 8}
-            wp_values_jet_or_e = {
-                "vvvloose": 1, "vvloose": 2, "vloose": 4,
-                "loose": 8, "medium": 16, "tight": 32,
-                "vtight": 64, "vvtight": 128,
-            }
+        if run == 3:
+            # PNet: raw float score thresholds from TauPOG
+            # Column prefix is "raw" (rawPNetVSjet, rawPNetVSe, rawPNetVSmu)
+            cfg.x.tau_tagger_column_prefix = "raw"
+            cfg.x.tau_id_working_points = DotDict.wrap({
+                "tau_vs_jet": {
+                    "vvvloose": 0.0565, "vvloose": 0.1774, "vloose": 0.3810,
+                    "loose": 0.6857, "medium": 0.8347, "tight": 0.9059,
+                    "vtight": 0.9494, "vvtight": 0.9737,
+                },
+                "tau_vs_e": {
+                    "vvvloose": 0.1266, "vvloose": 0.3547, "vloose": 0.6997,
+                    "loose": 0.9354, "medium": 0.9791, "tight": 0.9897,
+                    "vtight": 0.9946, "vvtight": 0.9971,
+                },
+                "tau_vs_mu": {
+                    "vloose": 0.2399, "loose": 0.6037,
+                    "medium": 0.8697, "tight": 0.9451,
+                },
+            })
         else:
-            wp_values_mu = {"vloose": 1, "loose": 2, "medium": 3, "tight": 4}
-            wp_values_jet_or_e = {
-                "vvvloose": 1, "vvloose": 2, "vloose": 3,
-                "loose": 4, "medium": 5, "tight": 6,
-                "vtight": 7, "vvtight": 8,
-            }
-
-        cfg.x.tau_id_working_points = DotDict.wrap({
-            "tau_vs_e": wp_values_jet_or_e,
-            "tau_vs_jet": wp_values_jet_or_e,
-            "tau_vs_mu": wp_values_mu,
-        })
+            # DeepTau: integer WP IDs
+            cfg.x.tau_tagger_column_prefix = "id"
+            # Legacy (campaign.x.version < 10) vs New format (>=10)
+            if campaign.x.version < 10:
+                wp_values_mu = {"vloose": 1, "loose": 2, "medium": 4, "tight": 8}
+                wp_values_jet_or_e = {
+                    "vvvloose": 1, "vvloose": 2, "vloose": 4,
+                    "loose": 8, "medium": 16, "tight": 32,
+                    "vtight": 64, "vvtight": 128,
+                }
+            else:
+                wp_values_mu = {"vloose": 1, "loose": 2, "medium": 3, "tight": 4}
+                wp_values_jet_or_e = {
+                    "vvvloose": 1, "vvloose": 2, "vloose": 3,
+                    "loose": 4, "medium": 5, "tight": 6,
+                    "vtight": 7, "vvtight": 8,
+                }
+            cfg.x.tau_id_working_points = DotDict.wrap({
+                "tau_vs_e": wp_values_jet_or_e,
+                "tau_vs_jet": wp_values_jet_or_e,
+                "tau_vs_mu": wp_values_mu,
+            })
 
         # --- Tau trigger working points
         cfg.x.tau_trigger_working_points = DotDict.wrap({
@@ -423,6 +461,7 @@ def add_config(
                       https://twiki.cern.ch/twiki/bin/view/CMS/JetResolution?rev=109
             - Run 3: https://cms-jerc.web.cern.ch/Recommendations/#2022
         """
+
         newyear = year % 100
         jec_uncertainty_sources = analysis_data["jec_sources"]
 
@@ -447,40 +486,69 @@ def add_config(
                 (2023, ""): "Prompt23",
                 (2023, "BPix"): "Prompt23",
                 (2024, ""): "Prompt24",
+                (2025, ""): "Prompt25",
             }.get((year, campaign.x.postfix))
             jec_version_map = {
-                (2022, ""): "V2",
-                (2022, "EE"): "V2",
-                (2023, ""): "V2",
-                (2023, "BPix"): "V3",
-                (2024, ""): "V1",
+                (2022, ""): "V2",  # soon "V4",
+                (2022, "EE"): "V2",  # soon "V4",
+                (2023, ""): "V2",  # soon "V4",
+                (2023, "BPix"): "V3",  # soon "V4",
+                (2024, ""): "V1",  # soon "V3",
+                (2025, ""): "V3",
+            }
+            """
+            nibs_version = {
+                "C": 1,
+                "D": 1,
+                "E": 1,
+                # "F": 1,
+                "F": 2,
+                # "G": 1,
+                "G": 2,
+                "H": 1,
+                "I": 1,
+            }
+            """
+            # Map from dataset era letter(s) to the JEC era string used in correction names.
+            # For eras that share a single combined correction (e.g. RunCD), every
+            # contributing run letter must map to the same string.
+            jec_era_map = {
+                (2022, ""): {"C": "RunCD", "D": "RunCD"},
+                (2022, "EE"): {"E": "RunE", "F": "RunF", "G": "RunG"},
+                (2023, ""): {"C": "RunCv123", "C4": "RunCv4"},
+                (2023, "BPix"): {"D": "RunD"},
+                (2024, ""): {},  # soon {p: f"Run{p}nib{nibs_version[p]}" for p in nibs_version},
+                (2025, ""): {"C": "RunC", "D": "RunD", "E": "RunE", "F": "RunF", "G": "RunG"},
             }
             if not jerc_postfix:
                 raise ValueError(f"Unsupported JERC configuration for Run 3: year={year}, postfix={campaign.x.postfix}")  # noqa: E501
-            jec_campaign = f"Summer{newyear}{campaign.x.postfix}{jerc_postfix}"
-            jer_campaign = f"Summer{newyear}{campaign.x.postfix}{jerc_postfix}"
-            # For the time being, use the Summer23BPix JERs for 2024 data.
-            # The JER MC_ScaleFactor and MC_PtResolution for the Summer24 samples
-            # will be announced soon (expected by the end of October 2025).
-            if year == 2024:
-                jer_campaign = "Summer23BPixPrompt23_RunD"
-            # Add special Run fragment for 2023
-            if year == 2023:
+
+            if year == 2025:
+                season = "Winter"
+            else:
+                season = "Summer"
+
+            jec_campaign = f"{season}{newyear}{campaign.x.postfix}{jerc_postfix}"
+            jer_campaign = f"{season}{newyear}{campaign.x.postfix}{jerc_postfix}"
+            if year in [2023, 2024]:
                 jer_campaign += f"_Run{'Cv1234' if campaign.has_tag('preBPix') else 'D'}"
+            _era_map = jec_era_map.get((year, campaign.x.postfix), {})
+            # Build inverse mapping: era string → list of run letters (for JER campaign suffix)
             jecjerdb = {
                 "jec_campaign": jec_campaign,
                 "jec_version": jec_version_map[(year, campaign.x.postfix)],
+                "jec_era_map": _era_map,
                 "jer_campaign": jer_campaign,
-                "jer_version": "JR" + {2022: "V1", 2023: "V1", 2024: "V1"}[year],
+                # soon "jer_version": "JR" + {2022: "V2", 2023: "V2", 2024: "V1", 2025: "V1"}[year],
+                "jer_version": "JR" + {2022: "V1", 2023: "V1", 2024: "V1", 2025: "V1"}[year],
                 "jet_type": "AK4PFPuppi",
-                "data_per_era": year == 2022,  # 2022 JEC depends on era
+                "data_per_era": year == 2022,
             }
 
-        if year in [2024, 2022]:
+        if year in [2024, 2022, 2023]:
             for src in ["TimeRunA", "TimeRunB", "TimeRunC", "TimeRunD"]:
                 if src in jec_uncertainty_sources:
                     jec_uncertainty_sources.remove(src)
-
         cfg.x.jec = DotDict.wrap({
             "Jet": {
                 "campaign": jecjerdb["jec_campaign"],
@@ -492,6 +560,9 @@ def add_config(
                 "uncertainty_sources": jec_uncertainty_sources,
             },
         })
+        # Store the run-letter → JEC-era-string mapping on the config so datasets
+        # can be tagged with the correct jec_era (e.g. "D" → "RunCD") later.
+        cfg.x.jec_era_map = jecjerdb.get("jec_era_map", {})
 
         cfg.x.jer = DotDict.wrap({
             "Jet": {
@@ -500,6 +571,13 @@ def add_config(
                 "jet_type": jecjerdb["jet_type"],
             },
         })
+
+        # As of the 2025-09-24 cvmfs sync, JME POG's combined jet_jerc.json.gz for
+        # 2024_Summer24 only ships JEC corrections; no PtResolution/ScaleFactor (JER) entries
+        # exist for any 2024 campaign name yet, so JER smearing can't be evaluated for 2024.
+        # Flip this back on once the POG publishes 2024 JER, see
+        # https://cms-jerc.web.cern.ch/Recommendations/#2024
+        cfg.x.jer_available = year != 2024
 
         cfg.x.jet_id = JetIdConfig(
             corrections={
@@ -521,7 +599,30 @@ def add_config(
         Configure custom methods for retrieving dataset LFNs depending on campaign settings.
         """
         cfg.x.get_dataset_lfns = None
-        cfg.x.get_dataset_lfns_sandbox = None
+        cfg.x.get_dataset_lfns_sandbox = dev_sandbox("bash::$CF_BASE/sandboxes/cf.sh")
+
+        # CI smoke tests (tests/run_analysis): use a single local fixture file instead of
+        # querying DAS via dasgoclient, so the pipeline doesn't need CVMFS/scram or a grid
+        # proxy. Opt-in only via MULTILEPTON_CI_TEST, set solely by .gitlab-ci.yml, so local
+        # and production runs are never affected. The fixture content is irrelevant here -
+        # this only needs to make GetDatasetLFNs (and downstream tasks) resolve and run, not
+        # validate physics content.
+        if os.getenv("MULTILEPTON_CI_TEST", "false").lower() == "true":
+            def get_ci_fixture_lfns(dataset_inst: od.Dataset, shift_inst: od.Shift, dataset_key: str) -> list[str]:
+                # one fixture per (config, dataset) pair - NOT shared across eras/datasets:
+                # different configs use different JEC/JER/correction files, trigger names,
+                # and NanoAOD schemas (e.g. v12 vs v15), so a single generic file could
+                # silently skip era-specific code paths or fail on schema mismatches.
+                # Uploaded to the Package Registry as "<config>__<dataset>.root" via
+                # tests/upload_ci_fixture.sh, downloaded per-job by .gitlab-ci.yml (each
+                # matrix job only needs its own CONFIG/DATASET fixture).
+                fname = f"{cfg.name}__{dataset_inst.name}.root"
+                return [f"/{fname}"]
+
+            cfg.x.get_dataset_lfns = get_ci_fixture_lfns
+            cfg.x.get_dataset_lfns_sandbox = law.NO_STR
+            cfg.x.get_dataset_lfns_remote_fs = lambda dataset_inst: ["local_fs_ci"]
+            return cfg
 
         # Handle special campaign type: "custom" with "creator" == "uhh"
         campaign_custom = cfg.campaign.x("custom", {})
@@ -664,7 +765,9 @@ def add_config(
     btagJECsources = analysis_data.get("btag_sf_jec_sources", [])
     btagJECsources += [f"Absolute_{year}", f"BBEC1_{year}", f"EC2_{year}", f"HF_{year}", f"RelativeSample_{year}", ""]
     cfg.x.btag_sf_jec_sources = btagJECsources
-    cfg.x.btag_working_points = bTagWorkingPoints(year, run, campaign)
+    cfg.x.btag_working_points = bTagWorkingPoints(era, run, campaign)
+
+    cfg.x.jet_id_has_multiplicity = campaign.x.version >= 15
 
     # Configure custom MVA models for lepton selection
     # Options: "custom" (XGBoost trained model), "nanoaod" (default NanoAOD MVA)
@@ -776,6 +879,15 @@ def add_config(
                     # https://cms-talk.web.cern.ch/t/noise-met-filters-in-run-3/63346/5
                     if y == 2022 and dataset.is_data and dataset.x.era in "FG":
                         dataset.add_tag("broken_ecalBadCalibFilter")
+                    # Set jec_era so columnflow picks the right per-run DATA correction.
+                    # dataset.x.era is a single letter (e.g. "D"); map it to the combined
+                    # era string used in the correction file (e.g. "RunCD").
+                    era_letter = getattr(dataset.x, "era", "")
+                    jec_era = cfg.x.jec_era_map.get(era_letter)
+                    if jec_era is None and era_letter:
+                        jec_era = f"Run{era_letter}"  # fallback: RunD, RunE, …
+                    if jec_era:
+                        dataset.x.jec_era = jec_era
 
     # verify that the root process of each dataset is part of any of the registered processes
     verify_config_processes(cfg, warn=True)
@@ -907,17 +1019,23 @@ def add_config(
     # =============================================
     # b-tag working points
     # =============================================
-    cfg.x.btag_sf_deepjet = BTagSFConfig(
-        correction_set="deepJet_shape",
-        jec_sources=cfg.x.btag_sf_jec_sources,
-        discriminator="btagDeepFlavB",
-    )
-    if run == 3:
-        cfg.x.btag_sf_pnet = BTagSFConfig(
-            correction_set="particleNet_shape",
+    # As of the 2025-09-24 cvmfs sync, the BTV POG json for 2024_Summer24 only exposes
+    # UParTAK4_wp_values (working-point thresholds); no deepJet_shape/particleNet_shape/
+    # UParTAK4_shape corrections exist yet, so b-tag shape SF reweighting can't run for 2024.
+    # Flip this back on once the POG publishes 2024 shape corrections.
+    cfg.x.btag_shape_sf_available = year != 2024
+    if cfg.x.btag_shape_sf_available:
+        cfg.x.btag_sf_deepjet = BTagSFConfig(
+            correction_set="deepJet_shape",
             jec_sources=cfg.x.btag_sf_jec_sources,
-            discriminator="btagPNetB",
+            discriminator="btagDeepFlavB",
         )
+        if run == 3:
+            cfg.x.btag_sf_pnet = BTagSFConfig(
+                correction_set="particleNet_shape",
+                jec_sources=cfg.x.btag_sf_jec_sources,
+                discriminator="btagPNetB",
+            )
         # add upart
         # cfg.x.btag_sf_upartak4 = BTagSFConfig(
         # correction_set="UParTAK4_shape",
@@ -955,8 +1073,6 @@ def add_config(
     # dy reweighting and recoil
     # =============================================
     if run == 3:
-        era = analysis_cfg.get_era(campaign)
-
         # dy reweighting
         # https://cms-higgs-leprare.docs.cern.ch/htt-common/DY_reweight
         cfg.x.dy_weight_config = DrellYanConfig(
@@ -1129,41 +1245,45 @@ def add_config(
     normtagFile = analysis_data["years"][year]["normtag"]
 
     add_external("lumi", {"golden": (goldenFile, "v1"), "normtag": (normtagFile, "v1")})
-    add_external("jet_jerc", (localizePOGSF(year, "JME", "jet_jerc.json.gz"), "v1"))
-    add_external("jet_veto_map", (localizePOGSF(year, "JME", "jetvetomaps.json.gz"), "v1"))
-    add_external("muon_sf", (localizePOGSF(year, "MUO", "muon_Z.json.gz"), "v1"))
-    add_external("electron_sf", (localizePOGSF(year, "EGM", f"electron{ver}.json.gz"), "v1"))
+    add_external("jet_jerc", (localizePOGSF(era, "JME", "jet_jerc.json.gz"), "v1"))
+    add_external("jet_veto_map", (localizePOGSF(era, "JME", "jetvetomaps.json.gz"), "v1"))
+    add_external("muon_sf", (localizePOGSF(era, "MUO", "muon_Z.json.gz"), "v1"))
+    add_external("electron_sf", (localizePOGSF(era, "EGM", f"electron{ver}.json.gz"), "v1"))
+    add_external("btag_sf_corr", (localizePOGSF(era, "BTV", "btagging.json.gz"), "v1"))
 
-    getfromyear = year
+    getfromera = era
     if year == 2024:
-        getfromyear = 2023  # these corrections are still missing for 2024 workaround with 2023 preBPix for now
-        tau_pog_suffix = "preBPix"
+        getfromera = "2023preBPix"  # these corrections are still missing for 2024 workaround with 2023 preBPix for now
         add_external("met_phi_corr", (f"{os.path.dirname(os.path.abspath(__file__))}/../data/{metPOGJsonFile}", "v1"))
     else:
-        add_external("met_phi_corr", (localizePOGSF(getfromyear, "JME", f"{metPOGJsonFile}"), "v1"))
-    add_external("btag_sf_corr", (localizePOGSF(getfromyear, "BTV", "btagging.json.gz"), "v1"))
-    add_external("tau_sf", (localizePOGSF(getfromyear, "TAU", f"{tauPOGJsonFile}"), "v1"))
-    add_external("pu_sf", (localizePOGSF(getfromyear, "LUM", "puWeights.json.gz"), "v1"))
+        add_external("met_phi_corr", (localizePOGSF(getfromera, "JME", f"{metPOGJsonFile}"), "v1"))
+    add_external("tau_sf", (localizePOGSF(getfromera, "TAU", f"{tauPOGJsonFile}"), "v1"))
+    add_external("pu_sf", (localizePOGSF(getfromera, "LUM", "puWeights.json.gz"), "v1"))
+    # making the trigger SF files readable when running condor jobs
+    trigger_sf_base = os.environ.get(
+        "MULTILEPTON_TRIGGER_SF_BASE",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "TriggerScaleFactors"),
+    )
     add_external("trigger_sf", Ext(
-        f"{os.path.dirname(os.path.abspath(__file__))}/../data/TriggerScaleFactors/{getfromyear}{tau_pog_suffix}",
+        os.path.join(trigger_sf_base, getfromera),
         subpaths=DotDict(
             muon="temporary_MuHlt_abseta_pt.json.gz",
             cross_muon="CrossMuTauHlt.json.gz",
             electron="electronHlt.json.gz",
             cross_electron="CrossEleTauHlt.json.gz",
-            tau=f"tau_trigger_DeepTau2018v2p5_{getfromyear}{tau_pog_suffix}.json.gz",
-            jet=f"ditaujet_jetleg60_{getfromyear}{tau_pog_suffix}.json.gz",
+            tau=f"tau_trigger_DeepTau2018v2p5_{getfromera}.json.gz",
+            jet=f"ditaujet_jetleg60_{getfromera}.json.gz",
         ),
         version="v1",
     ))
 
     # run specific files
     if run == 2:
-        add_external("tau_trigger_sf", (localizePOGSF(year, "TAU", "tau.json.gz"), "v1"))
+        add_external("tau_trigger_sf", (localizePOGSF(era, "TAU", "tau.json.gz"), "v1"))
     elif run == 3:
         # electron energy correction and smearing
-        add_external("electron_ss", (localizePOGSF(year, "EGM", f"electronSS_EtDependent{ver}.json.gz"), "v1"))
-        add_external("jet_id", (localizePOGSF(year, "JME", "jetid.json.gz"), "v1"))
+        add_external("electron_ss", (localizePOGSF(era, "EGM", f"electronSS_EtDependent{ver}.json.gz"), "v1"))
+        add_external("jet_id", (localizePOGSF(era, "JME", "jetid.json.gz"), "v1"))
 
     # =============================================
     # reductions
@@ -1285,6 +1405,10 @@ def add_config(
     # =============================================
     # add variables, categories , met and triggers
     # =============================================
+    # opt-in flag: the gen-matching classification (nonfakes/fakes/conversions/flips) and its
+    # categories are only needed for dedicated gen-matching/fake studies, so they are skipped by
+    # default to avoid slowing down every run; pass enable_gen_matching_studies=True to turn them on
+    cfg.x.enable_gen_matching_studies = enable_gen_matching_studies
     add_categories(cfg)
     add_variables(cfg)
     add_met_filters(cfg)

@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Runs the same columnflow tasks as local development to catch regressions on PR.
+
+action() {
+    local shell_is_zsh="$( [ -z "${ZSH_VERSION}" ] && echo "false" || echo "true" )"
+    local this_file="$( ${shell_is_zsh} && echo "${(%):-%x}" || echo "${BASH_SOURCE[0]}" )"
+    local this_dir="$( cd "$( dirname "${this_file}" )" && pwd )"
+
+    local task="cf.SelectEvents"
+    local version="ci_test"
+    local workflow="local"
+    local failed=()
+
+    # law.cfg references several $CF_* variables that setup.sh never defaults
+    # in CI (they're only set in the gitignored .setups/*.sh, e.g. copied from
+    # .setups/template.sh on a dev machine). Without them, law fails to parse
+    # the unexpanded literal strings as their expected types (bytes/bool/duration).
+    export CF_WLCG_CACHE_MAX_SIZE="${CF_WLCG_CACHE_MAX_SIZE:-15GB}"
+    export CF_WLCG_CACHE_GLOBAL_LOCK="${CF_WLCG_CACHE_GLOBAL_LOCK:-true}"
+    export CF_SLURM_RUNTIME="${CF_SLURM_RUNTIME:-3h}"
+    export CF_CRAB_SANDBOX_NAME="${CF_CRAB_SANDBOX_NAME:-CMSSW_14_2_1::arch=el9_amd64_gcc21}"
+
+    # In CI, setup.sh skips law's post-install step (which normally builds the
+    # task index), so "law run cf.<Task>" can't resolve short task names yet.
+    # Build/refresh the index here, scoped to this script only.
+    echo "Indexing law tasks..."
+    law index -q || return "$?"
+
+    # Each entry: "config:dataset"
+    local tests=(
+        "22preEE_v12_central:data_mu_d"
+        "22preEE_v12_central:ttzz_madgraph"
+        "22postEE_v12_central:data_mu_f"
+        "22postEE_v12_central:ttzz_madgraph"
+        "23preBPix_v12_central:data_mu_c1"
+        "23preBPix_v12_central:ttzz_madgraph"
+        "23postBPix_v12_central:data_mu_d1"
+        "23postBPix_v12_central:ttzz_madgraph"
+        "24_v15_central:data_mu_d"
+        "24_v15_central:ttzz_madgraph"
+    )
+
+    # When called with explicit config/dataset args (e.g. from a GitLab CI matrix job,
+    # one job per dataset), run only that single test instead of the full list below.
+    # Plain `bash tests/run_analysis` with no args still runs everything, as before.
+    if [ -n "${1:-}" ] && [ -n "${2:-}" ]; then
+        tests=("${1}:${2}")
+    fi
+
+    for entry in "${tests[@]}"; do
+        local config="${entry%%:*}"
+        local dataset="${entry##*:}"
+
+        echo ""
+        echo "=== ${config} / ${dataset} ==="
+        law run "${task}" \
+            --config "${config}" \
+            --dataset "${dataset}" \
+            --workflow "${workflow}" \
+            --version "${version}" \
+            --selector default \
+            --limit-dataset-files 1 \
+            --retries 1 \
+            --clear-logs \
+            --cleanup-jobs
+
+        if [ "$?" != "0" ]; then
+            echo "FAILED: ${config} / ${dataset}"
+            failed+=("${config}/${dataset}")
+        else
+            echo "OK: ${config} / ${dataset}"
+        fi
+    done
+
+    echo ""
+    if [ "${#failed[@]}" -ne 0 ]; then
+        echo "Failed tests:"
+        for e in "${failed[@]}"; do echo "  - ${e}"; done
+        return 1
+    fi
+    echo "All tests passed."
+    return 0
+}
+action "$@"

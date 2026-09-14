@@ -557,7 +557,7 @@ def add_variables(config: od.Config) -> None:
     # ---------------------------------------------------------
     # Di-Higgs Generator Level Variables
     # ---------------------------------------------------------
-    
+
     add_variable(
         config,
         name="mHH_gen",
@@ -566,7 +566,7 @@ def add_variables(config: od.Config) -> None:
         unit="GeV",
         x_title=r"Gen $m_{HH}$",
     )
-    
+
     add_variable(
         config,
         name="ptHH",
@@ -575,7 +575,7 @@ def add_variables(config: od.Config) -> None:
         unit="GeV",
         x_title=r"Gen $p_T^{HH}$",
     )
-    
+
     add_variable(
         config,
         name="ptH1",
@@ -584,7 +584,7 @@ def add_variables(config: od.Config) -> None:
         unit="GeV",
         x_title=r"Gen $p_T(H_1)$",
     )
-    
+
     add_variable(
         config,
         name="ptH2",
@@ -593,7 +593,7 @@ def add_variables(config: od.Config) -> None:
         unit="GeV",
         x_title=r"Gen $p_T(H_2)$",
     )
-    
+
     add_variable(
         config,
         name="acoplanarity",
@@ -601,7 +601,7 @@ def add_variables(config: od.Config) -> None:
         binning=(50, 0.0, 1.0),
         x_title=r"Acoplanarity (1 - |$\Delta\phi$|/$\pi$)",
     )
-    
+
     add_variable(
         config,
         name="costheta_star",
@@ -609,7 +609,7 @@ def add_variables(config: od.Config) -> None:
         binning=(50, -1.0, 1.0),
         x_title=r"cos($\theta^*$) in HH CM frame",
     )
-    
+
     # Note: hh_decay_mode is a string variable, not meant for histogramming
     # It's kept for analysis/filtering purposes but excluded from plotting
     # add_variable(

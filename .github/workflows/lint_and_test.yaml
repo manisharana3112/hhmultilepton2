@@ -13,9 +13,9 @@ jobs:
     steps:
       - name: Checkout ⬇️
         uses: actions/checkout@master
-        with:
-          persist-credentials: false
-          submodules: recursive
+
+      - name: Init columnflow submodule
+        run: git submodule update --init modules/columnflow
 
       - name: Setup python 🐍
         uses: actions/setup-python@v4

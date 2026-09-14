@@ -59,7 +59,7 @@ class default(MULTILEPTONInferenceModelBase):
 
     def init_categories(self) -> None:
         for ch in ["etau", "mutau", "tautau"]:
-            for cat in ["res1b", "res2b", "boosted"]:
+            for cat in ["res2b"]:
                 # gather fake processes to model data when needed
                 fake_processes = []
                 if self.fake_data:

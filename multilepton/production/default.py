@@ -7,8 +7,8 @@ Wrappers for some default sets of producers.
 from columnflow.production import Producer, producer
 from columnflow.production.normalization import stitched_normalization_weights
 from columnflow.production.categories import category_ids
-from columnflow.production.cms.electron import electron_weights
-from columnflow.production.cms.muon import muon_weights
+# from columnflow.production.cms.electron import electron_weights
+# from columnflow.production.cms.muon import muon_weights
 from columnflow.production.cms.top_pt_weight import top_pt_weight as cf_top_pt_weight
 from columnflow.production.cms.dy import dy_weights
 from columnflow.util import maybe_import
@@ -18,10 +18,10 @@ from multilepton.production.weights import (
     normalized_pu_weight, normalized_pdf_weight, normalized_murmuf_weight, normalized_ps_weights,
 )
 
-from multilepton.production.btag import normalized_btag_weights_deepjet, normalized_btag_weights_pnet
-from multilepton.production.tau import tau_weights
-from multilepton.production.trigger_sf import trigger_weight
-from multilepton.util import IF_DATASET_HAS_LHE_WEIGHTS, IF_RUN_3
+# from multilepton.production.btag import normalized_btag_weights_deepjet, normalized_btag_weights_pnet
+# from multilepton.production.tau import tau_weights
+# from multilepton.production.trigger_sf import trigger_weight
+from multilepton.util import IF_DATASET_HAS_LHE_WEIGHTS
 
 
 ak = maybe_import("awkward")
@@ -31,13 +31,13 @@ top_pt_weight = cf_top_pt_weight.derive("top_pt_weight", cls_dict={"require_data
 @producer(
     uses={
         category_ids, stitched_normalization_weights, normalized_pu_weight, normalized_ps_weights,
-        normalized_btag_weights_deepjet, IF_RUN_3(normalized_btag_weights_pnet),
+        # btag weight producers are currently disabled below (2024 has no deepJet/particleNet
+        # shape SFs or branches yet), so they're intentionally left out of uses/produces too
         IF_DATASET_HAS_LHE_WEIGHTS(normalized_pdf_weight, normalized_murmuf_weight),
         # weight producers added dynamically if produce_weights is set
     },
     produces={
         category_ids, stitched_normalization_weights, normalized_pu_weight, normalized_ps_weights,
-        normalized_btag_weights_deepjet, IF_RUN_3(normalized_btag_weights_pnet),
         IF_DATASET_HAS_LHE_WEIGHTS(normalized_pdf_weight, normalized_murmuf_weight),
         # weight producers added dynamically if produce_weights is set
     },
@@ -106,7 +106,9 @@ def default(self: Producer, events: ak.Array, **kwargs) -> ak.Array:
 @default.init
 def default_init(self: Producer, **kwargs) -> None:
     if self.produce_weights:
-        weight_producers = {tau_weights, electron_weights, muon_weights, trigger_weight}
+        # tau_weights, electron_weights, muon_weights, trigger_weight are currently disabled
+        # above (commented out), so they're intentionally left out of uses/produces too
+        weight_producers = set()
         if self.dataset_inst.has_tag("ttbar"):
             weight_producers.add(top_pt_weight)
         if self.dataset_inst.has_tag("dy"):

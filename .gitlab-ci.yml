@@ -1,0 +1,110 @@
+stages:
+  - lint
+  - test
+
+variables:
+  GIT_SUBMODULE_STRATEGY: none
+
+lint:
+  stage: lint
+  script:
+    - git submodule update --init --recursive modules/columnflow
+    - source setup.sh ""
+    - ./tests/run_linting
+  tags:
+    - cvmfs
+
+analysis:
+  stage: test
+  # One job per config/dataset pair, run in parallel and shown separately in the
+  # pipeline UI (e.g. "analysis: [22preEE_v12_central, data_mu_d]"), so a failure
+  # in one dataset doesn't hide or block the others. Keep this list in sync with
+  # the `tests` array in tests/run_analysis (used there for plain, no-arg local runs).
+  parallel:
+    matrix:
+      - CONFIG: "22preEE_v12_central"
+        DATASET: "data_mu_d"
+      - CONFIG: "22preEE_v12_central"
+        DATASET: "ttzz_madgraph"
+      - CONFIG: "22postEE_v12_central"
+        DATASET: "data_mu_f"
+      - CONFIG: "22postEE_v12_central"
+        DATASET: "ttzz_madgraph"
+      - CONFIG: "23preBPix_v12_central"
+        DATASET: "data_mu_c1"
+      - CONFIG: "23preBPix_v12_central"
+        DATASET: "ttzz_madgraph"
+      - CONFIG: "23postBPix_v12_central"
+        DATASET: "data_mu_d1"
+      - CONFIG: "23postBPix_v12_central"
+        DATASET: "ttzz_madgraph"
+      - CONFIG: "24_v15_central"
+        DATASET: "data_mu_d"
+      - CONFIG: "24_v15_central"
+        DATASET: "ttzz_madgraph"
+  script:
+    # CVMFS's cmsset_default.sh / scram calls `which` internally; some minimal
+    # runner images don't ship it, which breaks the CMS env setup used by
+    # cf.GetDatasetLFNs before it even gets to dasgoclient.
+    - (command -v dnf && dnf install -y which) || (command -v yum && yum install -y which) || (command -v apt-get && apt-get update && apt-get install -y which) || true
+    - git submodule update --init --recursive modules/columnflow
+    # Download this job's own CI fixture ROOT file from the Package Registry (never
+    # committed to git, so a normal clone/pull never downloads it). One file per
+    # (config, dataset) pair - see configs_multilepton.py:ConfigureLFNS - so each
+    # matrix job only pulls the one it actually needs, uploaded once via
+    # tests/upload_ci_fixture.sh.
+    - mkdir -p ci_fixtures
+    - >
+      curl --fail --location
+      --header "JOB-TOKEN: ${CI_JOB_TOKEN}"
+      "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/ci-fixtures/1.0.0/${CONFIG}__${DATASET}.root"
+      --output "ci_fixtures/${CONFIG}__${DATASET}.root"
+    # Pre-seed .setups/dev.sh so columnflow's interactive setup (cf_setup_interactive)
+    # takes its "already configured" fast path instead of re-querying every variable.
+    # Without this, in CI (no TTY) it silently resets CF_INTERACTIVE_VENV_FILE to its
+    # own empty default, so venv_multilepton.sh (with correctionlib/pandas/etc. via
+    # columnar.txt) never gets sourced and only the bare cf_dev lint venv is active,
+    # causing "ModuleNotFoundError: No module named 'correctionlib'" at runtime.
+    - mkdir -p .setups
+    - |
+      cat > .setups/dev.sh << 'EOF'
+      export CF_CERN_USER="ci"
+      export CF_DATA="$CF_REPO_BASE/data"
+      export CF_SOFTWARE_BASE="$CF_DATA/software"
+      export CF_JOB_BASE="$CF_DATA/jobs"
+      export CF_CERN_USER_FIRSTCHAR="${CF_CERN_USER:0:1}"
+      export CF_STORE_NAME="cf_store"
+      export CF_STORE_LOCAL="$CF_DATA/$CF_STORE_NAME"
+      export CF_WLCG_CACHE_ROOT=""
+      export CF_WLCG_USE_CACHE="false"
+      export CF_WLCG_CACHE_CLEANUP="false"
+      export CF_WLCG_CACHE_MAX_SIZE="15GB"
+      export CF_WLCG_CACHE_GLOBAL_LOCK="true"
+      export CF_VENV_SETUP_MODE_UPDATE="false"
+      export CF_INTERACTIVE_VENV_FILE="$MULTILEPTON_BASE/sandboxes/venv_multilepton.sh"
+      export CF_LOCAL_SCHEDULER="true"
+      export CF_FLAVOR="cms"
+      export LAW_CMS_VO="cms"
+      export CF_CRAB_STORAGE_ELEMENT=""
+      export CF_CRAB_BASE_DIRECTORY="/store/user/$CF_CERN_USER/cf_crab_outputs"
+      export CF_CRAB_SANDBOX_NAME="CMSSW_14_2_1::arch=el9_amd64_gcc21"
+      export CF_SLURM_RUNTIME="3h"
+      export WLCG_FILE_SYSTEM="wlcg_fs_cernbox"
+      # law_ci.cfg overrides [outputs].base_fs to write task outputs to
+      # local_fs_ci_store instead of real EOS/grid storage - see law_ci.cfg and
+      # law.cfg's [local_fs_ci_store] section for details.
+      export LAW_CONFIG_FILE="$MULTILEPTON_BASE/law_ci.cfg"
+      EOF
+    - source setup.sh dev
+    - bash tests/run_analysis "${CONFIG}" "${DATASET}"
+  variables:
+    # tells configs_multilepton.py:ConfigureLFNS to bypass dasgoclient/DAS entirely and
+    # use the local fixture below instead - no grid proxy needed for this smoke test.
+    MULTILEPTON_CI_TEST: "true"
+  tags:
+    - cvmfs
+  only:
+    - merge_requests
+    - main
+    - triggers
+    - web

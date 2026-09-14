@@ -6,6 +6,7 @@ Lepton selection methods.
 
 from __future__ import annotations
 
+import os
 import law
 
 from operator import or_
@@ -17,8 +18,11 @@ from columnflow.columnar_util import (
     set_ak_column, sorted_indices_from_mask, flat_np_view, full_like,
 )
 from columnflow.util import maybe_import
+from columnflow.production.cms.jet import jet_id
 
-from multilepton.util import IF_NANO_V9, IF_NANO_GE_V10, IF_NANO_V12, IF_NANO_V14, IF_NANO_V15
+from multilepton.util import (
+    IF_NANO_V9, IF_NANO_GE_V10, IF_NANO_V12, IF_NANO_V14, IF_NANO_V15, IF_NOT_NANO_V15,
+)
 from multilepton.selection.muon_mva import compute_muon_mva_score
 from multilepton.selection.electron_mva import compute_electron_mva_score
 from multilepton.config.util import Trigger
@@ -56,7 +60,7 @@ def trigger_object_matching(
 ) -> ak.Array:
     """
     Helper to check per object in *vectors1* if there is at least one object in *vectors2* that
-    leads to a delta R metric below *threshold*. The final reduction is applied over *axis* of the
+        leads to a delta R metric below *threshold*. The final reduction is applied over *axis* of the
     resulting metric table containing the full combinatorics. If an *event_mask* is given, the
     the matching is performed only for those events, but a full object mask with the same shape as
     that of *vectors1* is returned, which all objects set to *False* where not matching was done.
@@ -189,17 +193,60 @@ def get_cone_pt_from_jetidx(
     return cone_pt
 
 
+def hzz_iso_wp(electron, cuts=None):
+    """
+    Rebuilds Electron_mvaIso_WPHZZ from Electron_mvaHZZIso, for nano versions that contains the
+    score but not the WP flag (e.g. v12).
+    """
+    # mvaEleID-Winter22-HZZ-V1 working point, from cms-sw/cmssw
+    # RecoEgamma/ElectronIdentification/python/Identification/mvaElectronID_Winter22_HZZ_V1_cff.py
+    # nano stores tanh(raw) in Electron_mvaHZZIso (see MVAValueMapProducer.h in CMSSW)
+    if cuts is None:
+        cuts = np.tanh([
+            1.633973689084034,    # EB1, 5 < pt < 10
+            1.5499076306249353,   # EB2, 5 < pt < 10
+            2.0629564440753247,   # EE,  5 < pt < 10
+            0.3685228146685872,   # EB1, pt >= 10
+            0.2662407818935475,   # EB2, pt >= 10
+            -0.5444837363886459,  # EE,  pt >= 10
+        ])
+
+    # nano stores deltaEtaSC = superCluster().eta() - eta(), so superCluster().eta()
+    abs_sc_eta = abs(electron.eta + electron.deltaEtaSC)
+
+    categories = [
+        (electron.pt < 10) & (abs_sc_eta < 0.800),
+        (electron.pt < 10) & (abs_sc_eta >= 0.800) & (abs_sc_eta < 1.479),
+        (electron.pt < 10) & (abs_sc_eta >= 1.479),
+        (electron.pt >= 10) & (abs_sc_eta < 0.800),
+        (electron.pt >= 10) & (abs_sc_eta >= 0.800) & (abs_sc_eta < 1.479),
+        (electron.pt >= 10) & (abs_sc_eta >= 1.479),
+    ]
+
+    passed = ak.zeros_like(electron.pt, dtype=bool)
+    for category, cut in zip(categories, cuts):
+        passed = passed | (category & (electron.mvaHZZIso > cut))
+
+    return passed
+
+
 @selector(
     uses={
         "Electron.{pt,eta,phi,dxy,dz}",
         "Electron.{pfRelIso03_all,seediEtaOriX,seediPhiOriY,sip3d,miniPFRelIso_all,sieie}",
         "Electron.{hoe,eInvMinusPInv,convVeto,lostHits,jetPtRelv2,jetIdx}",
-        "Jet.{pt,eta,phi,btagPNetB,btagUParTAK4B}",
-        IF_NANO_V12("Electron.mvaTTH"),
-        IF_NANO_V14("Electron.promptMVA"),
-        IF_NANO_V15("Electron.promptMVA"),
+        # custom electron LeptonMVA input branches: without these declared here columnflow does
+        # not load them, so compute_electron_mva_score silently fed zeros -> degraded score.
+        "Electron.{miniPFRelIso_chg,deltaEtaSC,mvaNoIso}", "Jet.nConstituents",
+        # v2 model inputs; btagDeepFlavB is read off the matched jet (Electron.jetIdx), not a
+        # per-lepton branch
+        "Electron.{pfRelIso03_all,jetNDauCharged,jetPtRelv2}",
+        "Jet.{pt,eta,phi,btagDeepFlavB}",
+        IF_NANO_V12("Electron.{mvaTTH,mvaHZZIso}", "Jet.btagPNetB"),
+        IF_NANO_V14("Electron.{promptMVA,mvaIso_WPHZZ}", "Jet.btagPNetB"),
+        IF_NANO_V15("Electron.{promptMVA,mvaIso_WPHZZ}", "Jet.{btagPNetB,btagUParTAK4B}"),
         IF_NANO_V9("Electron.mvaFall17V2{Iso_WP80,Iso_WP90}"),
-        IF_NANO_GE_V10("Electron.{mvaIso_WP80,mvaIso_WP90,mvaIso_WPHZZ}"),
+        IF_NANO_GE_V10("Electron.{mvaIso_WP80,mvaIso_WP90}"),
     },
     exposed=False,
 )
@@ -240,11 +287,18 @@ def electron_selection(
         # check this in original root files if necessary
         mva_iso_wp80 = events.Electron.mvaIso_WP80
         mva_iso_wp90 = events.Electron.mvaIso_WP90
-        mva_iso_wphzz = events.Electron.mvaIso_WPHZZ
+        if "mvaIso_WPHZZ" in events.Electron.fields:
+            mva_iso_wphzz = events.Electron.mvaIso_WPHZZ
+        elif "mvaHZZIso" in events.Electron.fields:
+            # v12 carry the score but not the WPHZZ flag, so we apply the WP by hand
+            mva_iso_wphzz = hzz_iso_wp(events.Electron)
+        else:
+            mva_iso_wphzz = None
     else:
         # <= nano v9
         mva_iso_wp80 = events.Electron.mvaFall17V2Iso_WP80
         mva_iso_wp90 = events.Electron.mvaFall17V2Iso_WP90
+        mva_iso_wphzz = None
 
     # Get electron MVA source from config (default: "custom")
     # Options:
@@ -257,31 +311,114 @@ def electron_selection(
         # Try to use custom trained XGBoost model
         try:
             promptMVA = compute_electron_mva_score(events)
-            
+
         except Exception as e:
             # Fallback to NanoAOD MVA if custom model fails
-            logger.warning(f"Failed to load custom electron MVA model ({e}), falling back to NanoAOD MVA")
+            logger.warning_once(f"Failed to load custom electron MVA model ({e}), falling back to NanoAOD MVA")
             if "promptMVA" in events.Electron.fields:
                 promptMVA = events.Electron.promptMVA
-                logger.info("Using NanoAOD promptMVA (v14+) as fallback")
+                logger.warning_once("Using NanoAOD promptMVA (v14+) as fallback for electron selection")
             else:
                 promptMVA = events.Electron.mvaTTH
-                logger.info("Using NanoAOD mvaTTH (v<14) as fallback")
-    
+                logger.warning_once("Using NanoAOD mvaTTH (v<14) as fallback for electron selection")
+
     elif electron_mva_source == "nanoaod":
         # Use NanoAOD default MVA based on version
         if "promptMVA" in events.Electron.fields:
             # >= nano v14
             promptMVA = events.Electron.promptMVA
-            logger.info("Using NanoAOD promptMVA (v14+) for electron selection")
+            logger.warning_once("Using NanoAOD promptMVA (v14+) for electron selection")
         else:
             # nano <v14
             promptMVA = events.Electron.mvaTTH
-            logger.info("Using NanoAOD mvaTTH (v<14) for electron selection")
-    
+            logger.warning_once("Using NanoAOD mvaTTH (v<14) for electron selection")
+
     else:
         raise ValueError(f"Invalid electron_mva_source '{electron_mva_source}'. "
                        f"Choose from: 'custom' (XGBoost model), 'nanoaod' (version-based default)")
+    # =========================================
+    # MVA comparison debugging (gen-matched ROC check)
+    # =========================================
+    # NOTE: counting how many electrons pass a fixed *numeric* cut (e.g. 0.3) on both
+    # scores is NOT a valid comparison: the custom and nanoAOD scores live on different
+    # scales, so 0.3 is a different working point for each, and the sample here mixes
+    # prompt (signal) and fake (background) electrons. A ROC gain only shows up when you
+    # (a) separate signal/background via truth and (b) compare at a MATCHED efficiency.
+    if os.environ.get("MVA_FEATURE_DEBUG") and self.dataset_inst.is_mc and "genPartFlav" in events.Electron.fields:
+        try:
+            custom = ak.to_numpy(ak.flatten(compute_electron_mva_score(events))).astype(np.float64)
+        except Exception as cmp_e:
+            logger.warning_once(f"[Comparison electron] custom electron MVA failed ({cmp_e})")
+            custom = None
+
+        # same nanoAOD score the selection actually uses
+        if "promptMVA" in events.Electron.fields:
+            nano = ak.to_numpy(ak.flatten(events.Electron.promptMVA)).astype(np.float64)
+        else:
+            nano = ak.to_numpy(ak.flatten(events.Electron.mvaTTH)).astype(np.float64)
+
+        flav = ak.to_numpy(ak.flatten(events.Electron.genPartFlav))
+        is_sig = (flav == 1)          # prompt electron -> signal
+        is_bkg = (flav == 0)          # jet fake        -> background
+        keep = is_sig | is_bkg        # drop tau/photon-conversion electrons for a clean 2-class ROC
+
+        if custom is not None and is_sig.sum() > 0 and is_bkg.sum() > 0:
+            y = is_sig[keep].astype(int)
+            xc, xn = custom[keep], nano[keep]
+            n_sig, n_bkg = int(y.sum()), int((y == 0).sum())
+
+            # threshold-free discrimination: AUC (this is what the ROC "gain" reflects)
+            from sklearn.metrics import roc_auc_score
+            auc_c, auc_n = roc_auc_score(y, xc), roc_auc_score(y, xn)
+
+            # apples-to-apples working point: take nano's signal eff at its 0.3 cut, find the
+            # custom threshold giving the SAME signal eff, then compare background efficiency
+            sig_eff_nano = float((xn[y == 1] > 0.3).mean())
+            bkg_eff_nano = float((xn[y == 0] > 0.3).mean())
+            thr_c = float(np.quantile(xc[y == 1], 1.0 - sig_eff_nano))
+            bkg_eff_custom = float((xc[y == 0] > thr_c).mean())
+
+            logger.info_once(
+                f"[Comparison electron] gen-matched n_sig={n_sig} n_bkg={n_bkg} | \n"
+                f"AUC custom={auc_c:.4f} nano={auc_n:.4f} | \n"
+                f"@ matched sig-eff={sig_eff_nano:.3f}: bkg-eff nano={bkg_eff_nano:.4f} \n"
+                f"custom={bkg_eff_custom:.4f} (custom thr={thr_c:.3f})",
+            )
+
+            # ---- event-level yield comparison (nano vs custom) ----
+            # Count events keeping >=1 electron passing each MVA. For a FAIR comparison we use
+            # nano at its analysis cut (0.3) and custom at the threshold matched to the SAME
+            # signal efficiency (thr_c), so any yield difference reflects extra fake rejection,
+            # not just a looser/tighter numeric cut. (Stats here are one file only.)
+            n_per_evt = ak.to_numpy(ak.num(events.Electron.pt, axis=1))
+            custom_jag = ak.unflatten(custom, n_per_evt)
+            nano_jag = ak.unflatten(nano, n_per_evt)
+            nano_thr, custom_thr = 0.3, thr_c
+
+            n_evt = len(events)
+            evt_nano = int(ak.sum(ak.any(nano_jag > nano_thr, axis=1)))
+            evt_custom = int(ak.sum(ak.any(custom_jag > custom_thr, axis=1)))
+            sig_keep_nano = int(((nano > nano_thr) & is_sig).sum())
+            sig_keep_custom = int(((custom > custom_thr) & is_sig).sum())
+            fake_keep_nano = int(((nano > nano_thr) & is_bkg).sum())
+            fake_keep_custom = int(((custom > custom_thr) & is_bkg).sum())
+
+            # S/sqrt(B) significance-like figure: at matched signal eff S is ~equal, so the gain
+            # is driven by fake (B) reduction. Reported as a single number + relative gain.
+            z_nano = sig_keep_nano / np.sqrt(fake_keep_nano) if fake_keep_nano > 0 else float("inf")
+            z_custom = sig_keep_custom / np.sqrt(fake_keep_custom) if fake_keep_custom > 0 else float("inf")
+            z_gain = (z_custom / z_nano - 1.0) * 100.0 if np.isfinite(z_nano) and z_nano > 0 else float("nan")
+
+            logger.info_once(
+                f"[Yield electron] nano>{nano_thr:.3f} vs custom>{custom_thr:.3f} (matched sig-eff) | \n"
+                f"events(>=1 sel e)/{n_evt}: nano={evt_nano} custom={evt_custom} \n"
+                f"(delta={evt_custom - evt_nano:+d}) | \n"
+                f"prompt-e kept: nano={sig_keep_nano} custom={sig_keep_custom} | \n"
+                f"fake-e kept: nano={fake_keep_nano} custom={fake_keep_custom} \n"
+                f"(fakes removed by custom: {fake_keep_nano - fake_keep_custom:+d}) | \n"
+                f"S/sqrt(B): nano={z_nano:.2f} custom={z_custom:.2f} (gain={z_gain:+.1f}%)",
+            )
+    # =========================================
 
     # default electron mask
     tight_mask = None
@@ -292,11 +429,16 @@ def electron_selection(
 
         closestjet_indicies = events.Electron.jetIdx[:, :]
         bad_indicies = (closestjet_indicies == -1)  # set btag to 0 if no closest jet
-        btag_values_bad = 0 * events.Electron.pt[bad_indicies]
-        btag_values_good = events.Jet[closestjet_indicies[~bad_indicies]][btag_discriminator]
-        btag_values = ak.concatenate([btag_values_bad, btag_values_good], axis=1)
-        # atleast_medium = ((mva_iso_wp80 == 1) | (mva_iso_wp90 == 1))
-        atleast_loose = ((mva_iso_wp80 == 1) | (mva_iso_wp90 == 1) | (mva_iso_wphzz == 1))
+        btag_pad = ak.fill_none(ak.pad_none(events.Jet[btag_discriminator], 1, axis=1), 0.0)
+        btag_values = ak.where(
+            bad_indicies, 0.0, btag_pad[ak.where(bad_indicies, 0, closestjet_indicies)],
+        )
+        abs_sc_eta = abs(events.Electron.eta + events.Electron.deltaEtaSC)
+        sieie_max = ak.where(abs_sc_eta > 1.479, 0.030, 0.011)  # endcap, barrel
+
+        atleast_loose = ((mva_iso_wp80 == 1) | (mva_iso_wp90 == 1))
+        if mva_iso_wphzz is not None:
+            atleast_loose = atleast_loose | (mva_iso_wphzz == 1)
         tight_mask = (
             (events.Electron.pt > 10) &
             (abs(events.Electron.eta) < 2.5) &
@@ -304,7 +446,7 @@ def electron_selection(
             (abs(events.Electron.dz) < 1) &
             (events.Electron.sip3d < 8) &
             (events.Electron.miniPFRelIso_all < 0.4) &
-            (events.Electron.sieie < 0.019) &
+            (events.Electron.sieie < sieie_max) &
             (events.Electron.hoe < 0.1) &
             (events.Electron.eInvMinusPInv > -0.04) &
             (events.Electron.convVeto == 1) &
@@ -348,7 +490,7 @@ def electron_selection(
             (abs(events.Electron.dz) < 1) &
             (events.Electron.sip3d < 8) &
             (events.Electron.miniPFRelIso_all < 0.4) &
-            (events.Electron.sieie < 0.019) &
+            (events.Electron.sieie < sieie_max) &
             (events.Electron.hoe < 0.1) &
             (events.Electron.eInvMinusPInv > -0.04) &
             (events.Electron.convVeto == 1) &
@@ -414,10 +556,17 @@ def electron_trigger_matching(
     uses={
         "Muon.{pt,eta,phi,looseId,mediumId,tightId}",
         "Muon.{pfRelIso04_all,dxy,dz,sip3d,miniPFRelIso_all,jetPtRelv2,jetIdx}",
-        "Jet.{pt,eta,phi,btagPNetB,btagUParTAK4B}",
-        IF_NANO_V12("Muon.mvaTTH"),
-        IF_NANO_V14("Muon.promptMVA"),
-        IF_NANO_V15("Muon.promptMVA"),
+        # custom muon LeptonMVA input branches: without these declared here columnflow does not
+        # load them, so compute_muon_mva_score silently fed zeros -> degraded score.
+        "Muon.{miniPFRelIso_chg,nTrackerLayers,segmentComp,isTracker,nStations,isGlobal}",
+        "Jet.nConstituents",
+        # v2 model inputs; btagDeepFlavB is read off the matched jet (Muon.jetIdx), not a
+        # per-lepton branch
+        "Muon.{pfRelIso03_all,jetNDauCharged,jetPtRelv2}",
+        "Jet.{pt,eta,phi,btagDeepFlavB}",
+        IF_NANO_V12("Muon.mvaTTH", "Jet.btagPNetB"),
+        IF_NANO_V14("Muon.promptMVA", "Jet.btagPNetB"),
+        IF_NANO_V15("Muon.promptMVA", "Jet.{btagPNetB,btagUParTAK4B}"),
     },
     exposed=False,
 )
@@ -464,43 +613,120 @@ def muon_selection(
         #    min_pt = 23.0 if is_single else 20.0
         # else:
         #    min_pt = 26.0 if is_single else 22.0
-        
+
         # Select muon MVA based on configured source
         if muon_mva_source == "custom":
             # Try to use custom trained XGBoost model
             try:
                 promptMVA = compute_muon_mva_score(events)
-                
+
             except Exception as e:
                 # Fallback to NanoAOD MVA if custom model fails
                 logger.warning(f"Failed to load custom muon MVA model ({e}), falling back to NanoAOD MVA")
                 if "promptMVA" in events.Muon.fields:
                     promptMVA = events.Muon.promptMVA
-                    logger.info("Using NanoAOD promptMVA (v14+) as fallback")
+                    logger.info_once("Using NanoAOD promptMVA (v14+) as fallback for muon selection")
                 else:
                     promptMVA = events.Muon.mvaTTH
-                    logger.info("Using NanoAOD mvaTTH (v<14) as fallback")
-        
+                    logger.info_once("Using NanoAOD mvaTTH (v<14) as fallback for muon selection")
+
         elif muon_mva_source == "nanoaod":
             # Use NanoAOD default MVA based on version
             if "promptMVA" in events.Muon.fields:
                 # >= nano v14
                 promptMVA = events.Muon.promptMVA
-                logger.info("Using NanoAOD promptMVA (v14+)")
+                logger.info_once("Using NanoAOD promptMVA (v14+) for muon selection")
             else:
                 # nano <v14
                 promptMVA = events.Muon.mvaTTH
-                logger.info("Using NanoAOD mvaTTH (v<14)")
-        
+                logger.info_once("Using NanoAOD mvaTTH (v<14) for muon selection")
+
         else:
             raise ValueError(f"Invalid muon_mva_source '{muon_mva_source}'. "
                            f"Choose from: 'custom' (XGBoost model), 'nanoaod' (version-based default)")
 
+        # =========================================
+        # MVA comparison debugging (gen-matched ROC check) -- mirrors the electron block.
+        # Judge success by AUC / fake-rate at matched signal efficiency, NOT by counts at a
+        # fixed numeric cut (the two scores are on different scales). Muon analysis cut is 0.5.
+        # =========================================
+        debug = True
+        if debug and self.dataset_inst.is_mc and "genPartFlav" in events.Muon.fields:
+            try:
+                mu_custom = ak.to_numpy(ak.flatten(compute_muon_mva_score(events))).astype(np.float64)
+            except Exception as cmp_e:
+                logger.warning_once(f"[Comparison muon] custom muon MVA failed ({cmp_e})")
+                mu_custom = None
+
+            # same nanoAOD score the selection actually uses
+            if "promptMVA" in events.Muon.fields:
+                mu_nano = ak.to_numpy(ak.flatten(events.Muon.promptMVA)).astype(np.float64)
+            else:
+                mu_nano = ak.to_numpy(ak.flatten(events.Muon.mvaTTH)).astype(np.float64)
+
+            mu_flav = ak.to_numpy(ak.flatten(events.Muon.genPartFlav))
+            mu_is_sig = (mu_flav == 1)          # prompt muon -> signal
+            mu_is_bkg = (mu_flav == 0)          # jet fake    -> background
+            mu_keep = mu_is_sig | mu_is_bkg
+
+            if mu_custom is not None and mu_is_sig.sum() > 0 and mu_is_bkg.sum() > 0:
+                y = mu_is_sig[mu_keep].astype(int)
+                xc, xn = mu_custom[mu_keep], mu_nano[mu_keep]
+                n_sig, n_bkg = int(y.sum()), int((y == 0).sum())
+
+                from sklearn.metrics import roc_auc_score
+                auc_c, auc_n = roc_auc_score(y, xc), roc_auc_score(y, xn)
+
+                # nano's signal eff at its 0.5 cut, then the custom threshold giving the SAME
+                # signal eff -> compare background efficiency
+                sig_eff_nano = float((xn[y == 1] > 0.5).mean())
+                bkg_eff_nano = float((xn[y == 0] > 0.5).mean())
+                thr_c = float(np.quantile(xc[y == 1], 1.0 - sig_eff_nano))
+                bkg_eff_custom = float((xc[y == 0] > thr_c).mean())
+
+                logger.info_once(
+                    f"[Comparison muon] gen-matched n_sig={n_sig} n_bkg={n_bkg} | \n"
+                    f"AUC custom={auc_c:.4f} nano={auc_n:.4f} | \n"
+                    f"@ matched sig-eff={sig_eff_nano:.3f}: bkg-eff nano={bkg_eff_nano:.4f} \n"
+                    f"custom={bkg_eff_custom:.4f} (custom thr={thr_c:.3f})",
+                )
+
+                # ---- event-level yield comparison (nano vs custom) at matched signal eff ----
+                n_per_evt = ak.to_numpy(ak.num(events.Muon.pt, axis=1))
+                custom_jag = ak.unflatten(mu_custom, n_per_evt)
+                nano_jag = ak.unflatten(mu_nano, n_per_evt)
+                nano_thr, custom_thr = 0.5, thr_c
+
+                n_evt = len(events)
+                evt_nano = int(ak.sum(ak.any(nano_jag > nano_thr, axis=1)))
+                evt_custom = int(ak.sum(ak.any(custom_jag > custom_thr, axis=1)))
+                sig_keep_nano = int(((mu_nano > nano_thr) & mu_is_sig).sum())
+                sig_keep_custom = int(((mu_custom > custom_thr) & mu_is_sig).sum())
+                fake_keep_nano = int(((mu_nano > nano_thr) & mu_is_bkg).sum())
+                fake_keep_custom = int(((mu_custom > custom_thr) & mu_is_bkg).sum())
+
+                # S/sqrt(B) significance-like figure (see electron block for rationale)
+                z_nano = sig_keep_nano / np.sqrt(fake_keep_nano) if fake_keep_nano > 0 else float("inf")
+                z_custom = sig_keep_custom / np.sqrt(fake_keep_custom) if fake_keep_custom > 0 else float("inf")
+                z_gain = (z_custom / z_nano - 1.0) * 100.0 if np.isfinite(z_nano) and z_nano > 0 else float("nan")
+
+                logger.info_once(
+                    f"[Yield muon] nano>{nano_thr:.3f} vs custom>{custom_thr:.3f} (matched sig-eff) | \n"
+                    f"events(>=1 sel mu)/{n_evt}: nano={evt_nano} custom={evt_custom} \n"
+                    f"(delta={evt_custom - evt_nano:+d}) | \n"
+                    f"prompt-mu kept: nano={sig_keep_nano} custom={sig_keep_custom} | \n"
+                    f"fake-mu kept: nano={fake_keep_nano} custom={fake_keep_custom} \n"
+                    f"(fakes removed by custom: {fake_keep_nano - fake_keep_custom:+d}) | \n"
+                    f"S/sqrt(B): nano={z_nano:.2f} custom={z_custom:.2f} (gain={z_gain:+.1f}%)",
+                )
+        # =========================================
+
         closestjet_indicies = events.Muon.jetIdx[:, :]
         bad_indicies = (closestjet_indicies == -1)  # set btag to 0 if no closest jet
-        btag_values_bad = 0 * events.Muon.pt[bad_indicies]
-        btag_values_good = events.Jet[closestjet_indicies[~bad_indicies]][btag_discriminator]
-        btag_values = ak.concatenate([btag_values_bad, btag_values_good], axis=1)
+        btag_pad = ak.fill_none(ak.pad_none(events.Jet[btag_discriminator], 1, axis=1), 0.0)
+        btag_values = ak.where(
+            bad_indicies, 0.0, btag_pad[ak.where(bad_indicies, 0, closestjet_indicies)],
+        )
         atleast_medium = ((events.Muon.mediumId == 1) | (events.Muon.tightId == 1))
         atleast_loose = ((events.Muon.looseId == 1) | (events.Muon.mediumId == 1) | (events.Muon.tightId == 1))
         tight_mask = (
@@ -616,7 +842,9 @@ def tau_selection(
     is_cross_tau_jet = trigger.has_tag("cross_tau_tau_jet")
     is_2016 = self.config_inst.campaign.x.year == 2016
     is_run3 = self.config_inst.campaign.x.run == 3
-    get_tau_tagger = lambda tag: f"id{self.config_inst.x.tau_tagger}VS{tag}"
+    tagger = self.config_inst.x.tau_tagger
+    col_prefix = getattr(self.config_inst.x, "tau_tagger_column_prefix", "id")
+    get_tau_tagger = lambda tag: f"{col_prefix}{tagger}VS{tag}"
     wp_config = self.config_inst.x.tau_id_working_points
 
     # determine minimum pt and maximum eta
@@ -645,10 +873,13 @@ def tau_selection(
         (abs(events.Tau.dz) < 0.2)
     )
 
-    # base tau mask for default and qcd sideband tau
+    # Decay modes: Run 3 PNet includes DM=2, Run 2 HPS does not
+    dm_modes = (0, 1, 2, 10, 11) if is_run3 else (0, 1, 10, 11)
+
+    # base tau mask for default and qcd sideband tau (Fakeable selection)
     base_mask = noid_mask & (
-        reduce(or_, [events.Tau.decayMode == mode for mode in (0, 1, 10, 11)]) &
-        (events.Tau[get_tau_tagger("jet")] >= wp_config.tau_vs_jet.vvloose)
+        reduce(or_, [events.Tau.decayMode == mode for mode in dm_modes]) &
+        (events.Tau[get_tau_tagger("jet")] >= wp_config.tau_vs_jet.vvvloose)
         # vs e and mu cuts are channel dependent and thus applied in the overall lepton selection
     )
 
@@ -661,7 +892,7 @@ def tau_selection(
     # trigger dependent cuts
     trigger_specific_mask = base_mask & (events.Tau.pt > min_pt)
     # compute the isolation mask separately as it is used to defined (qcd) categories later on
-    iso_mask = events.Tau[get_tau_tagger("jet")] >= wp_config.tau_vs_jet.medium
+    iso_mask = events.Tau[get_tau_tagger("jet")] >= wp_config.tau_vs_jet.tight
 
     return base_mask, trigger_specific_mask, iso_mask, noid_mask
 
@@ -674,9 +905,11 @@ def tau_selection_init(self: Selector) -> None:
         for shift_inst in self.config_inst.shifts
         if shift_inst.has_tag("tec")
     }
-    # Add columns for the right tau tagger
+    # Add columns for the right tau tagger (id prefix for DeepTau, raw prefix for PNet)
+    col_prefix = getattr(self.config_inst.x, "tau_tagger_column_prefix", "id")
+    tagger = self.config_inst.x.tau_tagger
     self.uses |= {
-        f"Tau.id{self.config_inst.x.tau_tagger}VS{tag}"
+        f"Tau.{col_prefix}{tagger}VS{tag}"
         for tag in ("e", "mu", "jet")
     }
 
@@ -752,6 +985,12 @@ def tau_trigger_matching(
         electron_selection, electron_trigger_matching, muon_selection, muon_trigger_matching,
         tau_selection, tau_trigger_matching,
         "event", "{Electron,Muon,Tau}.{charge,mass}",
+        # jets are needed for the ttbarMR region
+        "Jet.{pt,eta,phi}",
+        IF_NOT_NANO_V15("Jet.jetId"),
+        IF_NANO_V12("Jet.btagPNetB"),
+        IF_NANO_V14("Jet.btagPNetB"),
+        IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
     },
     produces={
         electron_selection, electron_trigger_matching, muon_selection, muon_trigger_matching,
@@ -759,13 +998,16 @@ def tau_trigger_matching(
         # new columns
         "channel_id", "leptons_os", "tau2_isolated",
         "single_triggered", "cross_triggered",
-        "trig_match",  "trig_match_bdt", "matched_trigger_ids",
+        "trig_match", "trig_match_bdt", "matched_trigger_ids",
         "tight_sel", "tight_sel_bdt",
-        "ok_bdt_eormu", "ok_bdt_eormu_bveto",
+        "ok_bdt_eormu",
         "TauIso", "TauNoID",
         "MuonLoose", "MuonTight", "Muon.cone_pt", "Muon.muonLeptoMVA_hh",
-        "ElectronLoose", "ElectronTight", "Electron.cone_pt", 
+        "ElectronLoose", "ElectronTight", "Electron.cone_pt", "Electron.electronLeptoMVA_hh",
     },
+    # when True, evaluate the measurement regions instead of the physics channels
+    ffmr=False,
+    mr_channels={"cttbarMR", "cwzMR", "cdyMR"},
 )
 def lepton_selection(
     self: Selector,
@@ -778,7 +1020,9 @@ def lepton_selection(
     """
     wp_config = self.config_inst.x.tau_id_working_points
     disable_triggers = getattr(self.config_inst.x, "disable_triggers", False)
-    get_tau_tagger = lambda tag: f"id{self.config_inst.x.tau_tagger}VS{tag}"
+    tagger = self.config_inst.x.tau_tagger
+    col_prefix = getattr(self.config_inst.x, "tau_tagger_column_prefix", "id")
+    get_tau_tagger = lambda tag: f"{col_prefix}{tagger}VS{tag}"
 
     # get channels from the config
     print(self.config_inst)
@@ -791,7 +1035,7 @@ def lepton_selection(
     try:
         muon_mva_scores = compute_muon_mva_score(events)
         events = set_ak_column(events, ("Muon", "muonLeptoMVA_hh"), muon_mva_scores)
-        
+
     except Exception as e:
         print(f"Failed to compute custom muon MVA ({e}), creating dummy column with zeros")
         events = set_ak_column(events, ("Muon", "muonLeptoMVA_hh"), ak.zeros_like(events.Muon.pt))
@@ -800,7 +1044,7 @@ def lepton_selection(
     try:
         electron_mva_scores = compute_electron_mva_score(events)
         events = set_ak_column(events, ("Electron", "electronLeptoMVA_hh"), electron_mva_scores)
-       
+
     except Exception as e:
         print(f"Failed to compute custom electron MVA ({e}), creating dummy column with zeros")
         events = set_ak_column(events, ("Electron", "electronLeptoMVA_hh"), ak.zeros_like(events.Electron.pt))
@@ -951,12 +1195,23 @@ def lepton_selection(
         ("fam", "mu_match_any"): mu_match_any,
     })
 
+    data_stream = self.dataset_inst.name.split("_")[1] if self.dataset_inst.is_data else None
+
+    # ensuring the v15 jetID fix required for the ttbar mr jet selection
+    if self.ffmr and self.config_inst.x.jet_id_has_multiplicity:
+        events = self[jet_id](events, **kwargs)
+
     # ────────────────────────────────────────────────────────────────
     # 2 SECOND LOOP – evaluate every physics channel once
     # ────────────────────────────────────────────────────────────────
     for ch_key, spec in channels.items():
 
-        # eormu -> set trig_ids to any particular trigger, so that eormu does not run over all triggers
+        # the measurement regions overlap several physics channels, so the two cannot run in the
+        # same pass, they would collide in channel_id and in the leptons_os / tight_sel columns
+        if (ch_key in self.mr_channels) != self.ffmr:
+            continue
+
+        # eormu : set trig_ids to any particular trigger, so that eormu does not run over all triggers
         if ch_key in {"ceormu"}:
             if self.dataset_inst.is_mc:
                 trig_ids = tids.single_e
@@ -964,15 +1219,27 @@ def lepton_selection(
                 continue
 
         # 3l0th + 3l1th + 4l: single, double, and triple lepton triggers
-        elif ch_key in {"c3e", "c4e", "c3etau"}:
-            if self.dataset_inst.is_mc or self.dataset_inst.has_tag("ee"):
+        elif ch_key in {"c3e", "c4e"}:
+            if self.dataset_inst.is_mc or data_stream == "e":
                 trig_ids = tids.single_e + tids.double_e + tids.triple_e
             else:
                 continue
 
-        elif ch_key in {"c3mu", "c4mu", "c3mutau"}:
-            if self.dataset_inst.is_mc or self.dataset_inst.has_tag("mumu"):
+        elif ch_key in {"c3etau"}:
+            if self.dataset_inst.is_mc or data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e + tids.triple_e + tids.cross_e_tau
+            else:
+                continue
+
+        elif ch_key in {"c3mu", "c4mu"}:
+            if self.dataset_inst.is_mc or data_stream == "mu":
                 trig_ids = tids.single_mu + tids.double_mu + tids.triple_mu
+            else:
+                continue
+
+        elif ch_key in {"c3mutau"}:
+            if self.dataset_inst.is_mc or data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.triple_mu + tids.cross_mu_tau
             else:
                 continue
 
@@ -980,16 +1247,12 @@ def lepton_selection(
             if self.dataset_inst.is_mc:
                 trig_ids = (tids.single_e + tids.single_mu + tids.double_e + tids.double_mu +
                             tids.double_emu + tids.triple_eemu + tids.triple_emumu)
-            elif self.dataset_inst.has_tag("mue"):
+            elif data_stream == "muoneg":
                 trig_ids = tids.double_emu + tids.triple_emumu + tids.triple_eemu
-            elif self.dataset_inst.has_tag("mumu"):
-                trig_ids = tids.double_mu
-            elif self.dataset_inst.has_tag("ee"):
-                trig_ids = tids.double_e
-            elif self.dataset_inst.has_tag("emu_from_e"):
-                trig_ids = tids.single_e
-            elif self.dataset_inst.has_tag("emu_from_mu"):
-                trig_ids = tids.single_mu
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e
             else:
                 continue
 
@@ -997,13 +1260,11 @@ def lepton_selection(
             if self.dataset_inst.is_mc:
                 trig_ids = (tids.single_e + tids.single_mu + tids.double_e +
                             tids.double_emu + tids.triple_e + tids.triple_eemu)
-            elif self.dataset_inst.has_tag("mue"):
+            elif data_stream == "muoneg":
                 trig_ids = tids.double_emu + tids.triple_eemu
-            elif self.dataset_inst.has_tag("ee"):
-                trig_ids = tids.double_e + tids.triple_e
-            elif self.dataset_inst.has_tag("emu_from_e"):
-                trig_ids = tids.single_e
-            elif self.dataset_inst.has_tag("emu_from_mu"):
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e + tids.triple_e
+            elif data_stream == "mu":
                 trig_ids = tids.single_mu
             else:
                 continue
@@ -1012,67 +1273,147 @@ def lepton_selection(
             if self.dataset_inst.is_mc:
                 trig_ids = (tids.single_e + tids.single_mu + tids.double_mu +
                             tids.double_emu + tids.triple_mu + tids.triple_emumu)
-            elif self.dataset_inst.has_tag("mue"):
+            elif data_stream == "muoneg":
                 trig_ids = tids.double_emu + tids.triple_emumu
-            elif self.dataset_inst.has_tag("mumu"):
-                trig_ids = tids.double_mu + tids.triple_mu
-            elif self.dataset_inst.has_tag("emu_from_e"):
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.triple_mu
+            elif data_stream == "e":
                 trig_ids = tids.single_e
-            elif self.dataset_inst.has_tag("emu_from_mu"):
-                trig_ids = tids.single_mu
             else:
                 continue
 
-        elif ch_key in {"c2emu", "c2emutau"}:
+        elif ch_key in {"c2emu"}:
             if self.dataset_inst.is_mc:
                 trig_ids = tids.single_e + tids.single_mu + tids.double_e + tids.double_emu + tids.triple_eemu
-            elif self.dataset_inst.has_tag("mue"):
+            elif data_stream == "muoneg":
                 trig_ids = tids.double_emu + tids.triple_eemu
-            elif self.dataset_inst.has_tag("ee"):
-                trig_ids = tids.double_e
-            elif self.dataset_inst.has_tag("emu_from_e"):
-                trig_ids = tids.single_e
-            elif self.dataset_inst.has_tag("emu_from_mu"):
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e
+            elif data_stream == "mu":
                 trig_ids = tids.single_mu
             else:
                 continue
 
-        elif ch_key in {"ce2mu", "ce2mutau"}:
+        elif ch_key in {"c2emutau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = (tids.single_e + tids.single_mu + tids.double_e +
+                            tids.double_emu + tids.triple_eemu + tids.cross_e_tau + tids.cross_mu_tau)
+            elif data_stream == "muoneg":
+                trig_ids = tids.double_emu + tids.triple_eemu
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e + tids.cross_e_tau
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.cross_mu_tau
+            else:
+                continue
+
+        elif ch_key in {"ce2mu"}:
             if self.dataset_inst.is_mc:
                 trig_ids = tids.single_e + tids.single_mu + tids.double_mu + tids.double_emu + tids.triple_emumu
-            elif self.dataset_inst.has_tag("mue"):
+            elif data_stream == "muoneg":
                 trig_ids = tids.double_emu + tids.triple_emumu
-            elif self.dataset_inst.has_tag("mumu"):
-                trig_ids = tids.double_mu
-            elif self.dataset_inst.has_tag("emu_from_e"):
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu
+            elif data_stream == "e":
                 trig_ids = tids.single_e
-            elif self.dataset_inst.has_tag("emu_from_mu"):
-                trig_ids = tids.single_mu
             else:
                 continue
 
-        # 2l2th + 2l0or1tau: single, double mixed lepton triggers
-        elif ch_key in {"c2e2tau", "c2eSS1tau", "c2eSS"}:
-            if self.dataset_inst.is_mc or self.dataset_inst.has_tag("ee"):
+        elif ch_key in {"ce2mutau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = (tids.single_e + tids.single_mu + tids.double_mu +
+                            tids.double_emu + tids.triple_emumu + tids.cross_e_tau + tids.cross_mu_tau)
+            elif data_stream == "muoneg":
+                trig_ids = tids.double_emu + tids.triple_emumu
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.cross_mu_tau
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.cross_e_tau
+            else:
+                continue
+
+        # 2l0or1tau + 2l2th: single, double mixed lepton triggers
+        elif ch_key in {"c2eSS"}:
+            if self.dataset_inst.is_mc or data_stream == "e":
                 trig_ids = tids.single_e + tids.double_e
             else:
                 continue
 
-        elif ch_key in {"c2mu2tau", "c2muSS1tau", "c2muSS"}:
-            if self.dataset_inst.is_mc or self.dataset_inst.has_tag("mumu"):
+        elif ch_key in {"c2eSS1tau"}:
+            if self.dataset_inst.is_mc or data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e + tids.cross_e_tau
+            else:
+                continue
+
+        elif ch_key in {"c2e2tau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = tids.single_e + tids.double_e + tids.cross_e_tau + tids.cross_tau_tau_any
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e + tids.cross_e_tau
+            elif data_stream == "tau":
+                trig_ids = tids.cross_tau_tau_any
+            else:
+                continue
+
+        elif ch_key in {"c2muSS"}:
+            if self.dataset_inst.is_mc or data_stream == "mu":
                 trig_ids = tids.single_mu + tids.double_mu
             else:
                 continue
 
-        elif ch_key in {"cemu2tau", "cemuSS1tau", "cemuSS"}:
+        elif ch_key in {"c2muSS1tau"}:
+            if self.dataset_inst.is_mc or data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.cross_mu_tau
+            else:
+                continue
+
+        elif ch_key in {"c2mu2tau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = tids.single_mu + tids.double_mu + tids.cross_mu_tau + tids.cross_tau_tau_any
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.cross_mu_tau
+            elif data_stream == "tau":
+                trig_ids = tids.cross_tau_tau_any
+            else:
+                continue
+
+        elif ch_key in {"cemu2tau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = (tids.single_e + tids.single_mu + tids.double_emu +
+                            tids.cross_e_tau + tids.cross_mu_tau + tids.cross_tau_tau_any)
+            elif data_stream == "muoneg":
+                trig_ids = tids.double_emu
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.cross_e_tau
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.cross_mu_tau
+            elif data_stream == "tau":
+                trig_ids = tids.cross_tau_tau_any
+            else:
+                continue
+
+        elif ch_key in {"cemuSS"}:
             if self.dataset_inst.is_mc:
                 trig_ids = tids.single_e + tids.single_mu + tids.double_emu
-            elif self.dataset_inst.has_tag("mue"):
+            elif data_stream == "muoneg":
                 trig_ids = tids.double_emu
-            elif self.dataset_inst.has_tag("emu_from_e"):
+            elif data_stream == "e":
                 trig_ids = tids.single_e
-            elif self.dataset_inst.has_tag("emu_from_mu"):
+            elif data_stream == "mu":
                 trig_ids = tids.single_mu
+            else:
+                continue
+
+        elif ch_key in {"cemuSS1tau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = (tids.single_e + tids.single_mu + tids.double_emu +
+                            tids.cross_e_tau + tids.cross_mu_tau)
+            elif data_stream == "muoneg":
+                trig_ids = tids.double_emu
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.cross_e_tau
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.cross_mu_tau
             else:
                 continue
 
@@ -1080,9 +1421,9 @@ def lepton_selection(
         elif ch_key in {"ce3tau"}:
             if self.dataset_inst.is_mc:
                 trig_ids = tids.single_e + tids.cross_e_tau + tids.cross_tau_tau_any
-            elif self.dataset_inst.has_tag("tautau"):
+            elif data_stream == "tau":
                 trig_ids = tids.cross_tau_tau_any
-            elif self.dataset_inst.has_tag("etau"):
+            elif data_stream == "e":
                 trig_ids = tids.single_e + tids.cross_e_tau
             else:
                 continue
@@ -1090,17 +1431,77 @@ def lepton_selection(
         elif ch_key in {"cmu3tau"}:
             if self.dataset_inst.is_mc:
                 trig_ids = tids.single_mu + tids.cross_mu_tau + tids.cross_tau_tau_any
-            elif self.dataset_inst.has_tag("tautau"):
+            elif data_stream == "tau":
                 trig_ids = tids.cross_tau_tau_any
-            elif self.dataset_inst.has_tag("mutau"):
+            elif data_stream == "mu":
                 trig_ids = tids.single_mu + tids.cross_mu_tau
             else:
                 continue
 
         # 1l2th, 4tauh
-        elif ch_key in {"c4tau", "ce2tau", "cmu2tau"}:
-            if self.dataset_inst.is_mc or self.dataset_inst.has_tag("tautau"):
+        elif ch_key in {"c4tau"}:
+            if self.dataset_inst.is_mc or data_stream == "tau":
                 trig_ids = tids.cross_tau_tau_any
+            else:
+                continue
+
+        elif ch_key in {"ce2tau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = tids.single_e + tids.cross_e_tau + tids.cross_tau_tau_any
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.cross_e_tau
+            elif data_stream == "tau":
+                trig_ids = tids.cross_tau_tau_any
+            else:
+                continue
+
+        elif ch_key in {"cmu2tau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = tids.single_mu + tids.cross_mu_tau + tids.cross_tau_tau_any
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.cross_mu_tau
+            elif data_stream == "tau":
+                trig_ids = tids.cross_tau_tau_any
+            else:
+                continue
+
+        # ttbar measurement region
+        elif ch_key in {"cttbarMR"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = (tids.single_e + tids.single_mu +
+                            tids.double_e + tids.double_mu + tids.double_emu +
+                            tids.cross_e_tau + tids.cross_mu_tau)
+            elif data_stream == "muoneg":
+                trig_ids = tids.double_emu
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e + tids.cross_e_tau
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.cross_mu_tau
+            else:
+                continue
+
+        # WZ measurement region
+        elif ch_key in {"cwzMR"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = (tids.single_e + tids.single_mu +
+                            tids.double_e + tids.double_mu + tids.double_emu +
+                            tids.triple_e + tids.triple_mu + tids.triple_eemu + tids.triple_emumu +
+                            tids.cross_e_tau + tids.cross_mu_tau)
+            elif data_stream == "muoneg":
+                trig_ids = tids.double_emu + tids.triple_eemu + tids.triple_emumu
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e + tids.triple_e + tids.cross_e_tau
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.triple_mu + tids.cross_mu_tau
+            else:
+                continue
+
+        # Drell-Yan + jets measurement region
+        elif ch_key in {"cdyMR"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = tids.single_mu + tids.double_mu + tids.cross_mu_tau
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.cross_mu_tau
             else:
                 continue
 
@@ -1132,11 +1533,11 @@ def lepton_selection(
 
             fired = _trig_cache[(tid, "fired")]
 
-            # channel independent deeptau cuts vs e and mu, taumask has vs jet vvloose
+            # channel independent tau ID cuts vs e and mu (PNet: unified VLoose vs_e + Tight vs_mu)
             ch_tau_mask = (
                 tau_mask &
-                (events.Tau[get_tau_tagger("e")] >= wp_config.tau_vs_e.vvvloose) &
-                (events.Tau[get_tau_tagger("mu")] >= wp_config.tau_vs_mu.vloose)
+                (events.Tau[get_tau_tagger("e")] >= wp_config.tau_vs_e.vloose) &
+                (events.Tau[get_tau_tagger("mu")] >= wp_config.tau_vs_mu.tight)
             )
 
             ok = ak.ones_like(events.event, dtype=bool)
@@ -2313,6 +2714,336 @@ def lepton_selection(
                 ids = ak.where(trig_match_ok, np.float32(tid), np.float32(np.nan))
                 matched_trigger_ids.append(ak.singletons(ak.nan_to_none(ids)))
 
+            elif ch_key == "cttbarMR":
+
+                mr_z_mass = 91.18
+                mr_z_window = 10.0
+
+                if self.config_inst.campaign.x.year in {2024, 2025, 2026}:
+                    mr_btag_tagger = "UParTAK4"
+                    mr_btag_discriminator = "btagUParTAK4B"
+                else:
+                    mr_btag_tagger = "particleNet"
+                    mr_btag_discriminator = "btagPNetB"
+                mr_btagcut_tight = self.config_inst.x.btag_working_points[mr_btag_tagger]["tight"]
+                mr_btagcut_medium = self.config_inst.x.btag_working_points[mr_btag_tagger]["medium"]
+                mr_btagcut_loose = self.config_inst.x.btag_working_points[mr_btag_tagger]["loose"]
+
+                mr_jet_mask = (
+                    (events.Jet.jetId == 6) &
+                    (events.Jet.pt > 20.0) &
+                    (abs(events.Jet.eta) < 2.5)
+                )
+                mr_jet_mask = mr_jet_mask & ak.all(
+                    events.Jet.metric_table(events.Electron[e_ctrl]) > 0.5, axis=2,
+                )
+                mr_jet_mask = mr_jet_mask & ak.all(
+                    events.Jet.metric_table(events.Muon[mu_ctrl]) > 0.5, axis=2,
+                )
+                mr_jet_notau = mr_jet_mask & ak.all(
+                    events.Jet.metric_table(events.Tau[noid_tau_mask]) > 0.5, axis=2,
+                )
+                mr_jet_btag = events.Jet[mr_btag_discriminator]
+                mr_jet_ok = (
+                    (ak.sum(mr_jet_mask, axis=1) >= 2) &
+                    (ak.sum(mr_jet_notau & (mr_jet_btag > mr_btagcut_medium), axis=1) >= 1) &
+                    (ak.sum(mr_jet_mask & (mr_jet_btag > mr_btagcut_loose), axis=1) >= 2) &
+                    (ak.sum(mr_jet_notau & (mr_jet_btag > mr_btagcut_tight), axis=1) < 1)
+                )
+
+                mr_n_e = ak.sum(e_mask, axis=1)
+                mr_n_mu = ak.sum(mu_mask, axis=1)
+                mr_es = ak.pad_none(events.Electron[e_mask], 2, axis=1)
+                mr_mus = ak.pad_none(events.Muon[mu_mask], 2, axis=1)
+
+                mr_mll = ak.where(
+                    mr_n_e == 2,
+                    (mr_es[:, 0] * 1 + mr_es[:, 1] * 1).mass,
+                    ak.where(
+                        mr_n_mu == 2,
+                        (mr_mus[:, 0] * 1 + mr_mus[:, 1] * 1).mass,
+                        (mr_es[:, 0] * 1 + mr_mus[:, 0] * 1).mass,
+                    ),
+                )
+                mr_mll = ak.fill_none(mr_mll, 0.0)
+
+                mr_charge_prod = ak.where(
+                    mr_n_e == 2,
+                    mr_es[:, 0].charge * mr_es[:, 1].charge,
+                    ak.where(
+                        mr_n_mu == 2,
+                        mr_mus[:, 0].charge * mr_mus[:, 1].charge,
+                        mr_es[:, 0].charge * mr_mus[:, 0].charge,
+                    ),
+                )
+                mr_os_ok = ak.fill_none(mr_charge_prod < 0, False)
+                mr_same_flavour = (mr_n_e == 2) | (mr_n_mu == 2)
+
+                base_ok = (
+                    (mr_n_e + mr_n_mu == 2) &
+                    (ak.sum(e_veto, axis=1) + ak.sum(mu_veto, axis=1) == 2) &
+                    mr_os_ok &
+                    (mr_mll > 12.0) &
+                    (~mr_same_flavour | (np.abs(mr_mll - mr_z_mass) > mr_z_window)) &
+                    (ak.sum(ch_tau_mask, axis=1) >= 1) &
+                    mr_jet_ok
+                )
+
+                mr_total_charge = (
+                    ak.sum(events.Electron.charge[e_ctrl], axis=1) +
+                    ak.sum(events.Muon.charge[mu_ctrl], axis=1) +
+                    ak.sum(events.Tau.charge[ch_tau_mask], axis=1)
+                )
+                base_ok = base_ok & (
+                    (ak.sum(ch_tau_mask, axis=1) != 2) | (np.abs(mr_total_charge) != 0)
+                )
+
+                if not disable_triggers:
+                    base_ok = base_ok & fired
+
+                ok = ak.where(base_ok, ok, False)
+
+                sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
+                sel_looseelectron_mask = sel_looseelectron_mask | (ok & e_veto)
+                sel_tightelectron_mask = sel_tightelectron_mask | (ok & e_mask)
+                sel_muon_mask = sel_muon_mask | (ok & mu_ctrl)
+                sel_loosemuon_mask = sel_loosemuon_mask | (ok & mu_veto)
+                sel_tightmuon_mask = sel_tightmuon_mask | (ok & mu_mask)
+                sel_tau_mask = sel_tau_mask | (ok & ch_tau_mask)
+                sel_isotau_mask = sel_isotau_mask | (ok & (ch_tau_mask & tau_iso_mask))
+
+                chargeok = mr_os_ok
+                leptons_os = ak.where(ok, chargeok, leptons_os)
+
+                tight_ok = ok & (ak.sum((ch_tau_mask & tau_iso_mask), axis=1) >= 1)
+                tight_sel = tight_sel | tight_ok
+
+                trig_match_ok = base_ok
+                if tid in tids.single_e:
+                    trig_match_ok = trig_match_ok & (ak.sum(e_match & e_ctrl, axis=1) >= 1)
+                    if_mu_fired = base_ok & mu_trig_any & (ak.sum(mu_match_any & mu_ctrl, axis=1) >= 1)
+                    trig_match_ok = ak.where(mu_trig_any, trig_match_ok & if_mu_fired, trig_match_ok)
+                elif tid in tids.single_mu:
+                    trig_match_ok = trig_match_ok & (ak.sum(mu_match & mu_ctrl, axis=1) >= 1)
+                    if_e_fired = base_ok & e_trig_any & (ak.sum(e_match_any & e_ctrl, axis=1) >= 1)
+                    trig_match_ok = ak.where(e_trig_any, trig_match_ok & if_e_fired, trig_match_ok)
+                elif tid in tids.double_e:
+                    trig_match_ok = trig_match_ok & (ak.sum(e_match & e_ctrl, axis=1) >= 2)
+                elif tid in tids.double_mu:
+                    trig_match_ok = trig_match_ok & (ak.sum(mu_match & mu_ctrl, axis=1) >= 2)
+                elif tid in tids.double_emu:
+                    trig_match_ok = trig_match_ok & (
+                        (ak.sum(e_match & e_ctrl, axis=1) >= 1) &
+                        (ak.sum(mu_match & mu_ctrl, axis=1) >= 1)
+                    )
+                elif tid in tids.cross_e_tau:
+                    trig_match_ok = trig_match_ok & (
+                        (ak.sum(tau_match & ch_tau_mask, axis=1) >= 1) &
+                        (ak.sum(e_match & e_ctrl, axis=1) >= 1)
+                    )
+                elif tid in tids.cross_mu_tau:
+                    trig_match_ok = trig_match_ok & (
+                        (ak.sum(tau_match & ch_tau_mask, axis=1) >= 1) &
+                        (ak.sum(mu_match & mu_ctrl, axis=1) >= 1)
+                    )
+
+                trig_match = trig_match | trig_match_ok
+
+                single_triggered = ak.where(trig_match_ok, True, single_triggered)
+                ids = ak.where(trig_match_ok, np.float32(tid), np.float32(np.nan))
+                matched_trigger_ids.append(ak.singletons(ak.nan_to_none(ids)))
+
+            elif ch_key == "cwzMR":
+
+                mr_z_mass = 91.18
+                mr_z_window = 10.0
+
+                def mr_has_z_pair(objs):
+                    pairs = ak.combinations(objs, 2, axis=1, fields=["l1", "l2"])
+                    os_pairs = (pairs.l1.charge * pairs.l2.charge) < 0
+                    masses = (pairs.l1 * 1 + pairs.l2 * 1).mass
+                    return ak.any(os_pairs & (abs(masses - mr_z_mass) < mr_z_window), axis=1)
+
+                mr_z_from_e = mr_has_z_pair(events.Electron[e_mask])
+                mr_z_from_mu = mr_has_z_pair(events.Muon[mu_mask])
+
+                e_charge = events.Electron.charge[e_mask]
+                mu_charge = events.Muon.charge[mu_mask]
+                # tau_charge = events.Tau.charge[ch_tau_mask]
+
+                # for the 3 same-flavour leptons, the Z pair is the OS one closest to mZ
+                charge_3mu = mr_z_from_mu & (np.abs(ak.sum(mu_charge, axis=1)) == 1)
+                charge_3e = mr_z_from_e & (np.abs(ak.sum(e_charge, axis=1)) == 1)
+                charge_2mue = mr_z_from_mu & (ak.sum(mu_charge, axis=1) == 0)
+                charge_mu2e = mr_z_from_e & (ak.sum(e_charge, axis=1) == 0)
+
+                base_ok_3mu = (
+                    (ak.sum(e_veto, axis=1) == 0) &
+                    (ak.sum(mu_ctrl, axis=1) == 3) &
+                    (ak.sum(mu_veto, axis=1) == 3) &
+                    (ak.sum(mu_mask, axis=1) == 3) &
+                    (ak.sum(ch_tau_mask, axis=1) >= 1) &
+                    charge_3mu
+                )
+                base_ok_2mue = (
+                    (ak.sum(e_ctrl, axis=1) == 1) &
+                    (ak.sum(e_veto, axis=1) == 1) &
+                    (ak.sum(e_mask, axis=1) == 1) &
+                    (ak.sum(mu_ctrl, axis=1) == 2) &
+                    (ak.sum(mu_veto, axis=1) == 2) &
+                    (ak.sum(mu_mask, axis=1) == 2) &
+                    (ak.sum(ch_tau_mask, axis=1) >= 1) &
+                    charge_2mue
+                )
+                base_ok_mu2e = (
+                    (ak.sum(e_ctrl, axis=1) == 2) &
+                    (ak.sum(e_veto, axis=1) == 2) &
+                    (ak.sum(e_mask, axis=1) == 2) &
+                    (ak.sum(mu_ctrl, axis=1) == 1) &
+                    (ak.sum(mu_veto, axis=1) == 1) &
+                    (ak.sum(mu_mask, axis=1) == 1) &
+                    (ak.sum(ch_tau_mask, axis=1) >= 1) &
+                    charge_mu2e
+                )
+                base_ok_3e = (
+                    (ak.sum(mu_veto, axis=1) == 0) &
+                    (ak.sum(e_ctrl, axis=1) == 3) &
+                    (ak.sum(e_veto, axis=1) == 3) &
+                    (ak.sum(e_mask, axis=1) == 3) &
+                    (ak.sum(ch_tau_mask, axis=1) >= 1) &
+                    charge_3e
+                )
+                base_ok = base_ok_3mu | base_ok_2mue | base_ok_mu2e | base_ok_3e
+
+                # we can use the charge criteria to ensure orthogonality with the 3l1th SR
+                mr_all_iso = (
+                    ak.sum(ch_tau_mask & tau_iso_mask, axis=1) == ak.sum(ch_tau_mask, axis=1)
+                )
+                mr_total_charge = (
+                    ak.sum(events.Electron.charge[e_ctrl], axis=1) +
+                    ak.sum(events.Muon.charge[mu_ctrl], axis=1) +
+                    ak.sum(events.Tau.charge[ch_tau_mask], axis=1)
+                )
+                base_ok = base_ok & (
+                    (ak.sum(ch_tau_mask, axis=1) != 1) | ~mr_all_iso |
+                    (np.abs(mr_total_charge) != 0)
+                )
+
+                if not disable_triggers:
+                    base_ok = base_ok & fired
+
+                ok = ak.where(base_ok, ok, False)
+
+                sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
+                sel_looseelectron_mask = sel_looseelectron_mask | (ok & e_veto)
+                sel_tightelectron_mask = sel_tightelectron_mask | (ok & e_mask)
+                sel_muon_mask = sel_muon_mask | (ok & mu_ctrl)
+                sel_loosemuon_mask = sel_loosemuon_mask | (ok & mu_veto)
+                sel_tightmuon_mask = sel_tightmuon_mask | (ok & mu_mask)
+                sel_tau_mask = sel_tau_mask | (ok & ch_tau_mask)
+                sel_isotau_mask = sel_isotau_mask | (ok & (ch_tau_mask & tau_iso_mask))
+
+                chargeok = charge_3mu | charge_2mue | charge_mu2e | charge_3e
+                leptons_os = ak.where(ok, chargeok, leptons_os)
+
+                # ch_tau_mask = ch_tau_mask & (events.Tau[get_tau_tagger("e")] >= wp_config.tau_vs_e.vloose)
+                tight_ok = ok & ((ak.sum((ch_tau_mask & tau_iso_mask), axis=1) >= 1))
+                tight_sel = tight_sel | tight_ok
+
+                trig_match_ok = base_ok
+                if tid in tids.single_e:
+                    trig_match_ok = trig_match_ok & (ak.sum(e_match & e_ctrl, axis=1) >= 1)
+                    if_mu_fired = base_ok & mu_trig_any & (ak.sum(mu_match_any & mu_ctrl, axis=1) >= 1)
+                    trig_match_ok = ak.where(mu_trig_any, trig_match_ok & if_mu_fired, trig_match_ok)
+                elif tid in tids.single_mu:
+                    trig_match_ok = trig_match_ok & (ak.sum(mu_match & mu_ctrl, axis=1) >= 1)
+                    if_e_fired = base_ok & e_trig_any & (ak.sum(e_match_any & e_ctrl, axis=1) >= 1)
+                    trig_match_ok = ak.where(e_trig_any, trig_match_ok & if_e_fired, trig_match_ok)
+                elif tid in tids.cross_e_tau:
+                    trig_match_ok = trig_match_ok & (
+                        (ak.sum(tau_match & ch_tau_mask, axis=1) >= 1) &
+                        (ak.sum(e_match & e_ctrl, axis=1) >= 1)
+                    )
+                    if_mu_fired = base_ok & mu_trig_any & (ak.sum(mu_match_any & mu_ctrl, axis=1) >= 1)
+                    trig_match_ok = ak.where(mu_trig_any, trig_match_ok & if_mu_fired, trig_match_ok)
+                elif tid in tids.cross_mu_tau:
+                    trig_match_ok = trig_match_ok & (
+                        (ak.sum(tau_match & ch_tau_mask, axis=1) >= 1) &
+                        (ak.sum(mu_match & mu_ctrl, axis=1) >= 1)
+                    )
+                    if_e_fired = base_ok & e_trig_any & (ak.sum(e_match_any & e_ctrl, axis=1) >= 1)
+                    trig_match_ok = ak.where(e_trig_any, trig_match_ok & if_e_fired, trig_match_ok)
+
+                trig_match = trig_match | trig_match_ok
+
+                single_triggered = ak.where(trig_match_ok, True, single_triggered)
+                ids = ak.where(trig_match_ok, np.float32(tid), np.float32(np.nan))
+                matched_trigger_ids.append(ak.singletons(ak.nan_to_none(ids)))
+
+            elif ch_key == "cdyMR":
+
+                mr_z_mass = 91.18
+                mr_z_window = 10.0
+                mr_mus = ak.pad_none(events.Muon[mu_mask], 2, axis=1)
+                mr_mumu_mass = (mr_mus[:, 0] * 1 + mr_mus[:, 1] * 1).mass
+                mr_z_ok = ak.fill_none(abs(mr_mumu_mass - mr_z_mass) < mr_z_window, False)
+
+                base_ok = (
+                    (ak.sum(mu_ctrl, axis=1) == 2) &
+                    (ak.sum(mu_veto, axis=1) == 2) &
+                    (ak.sum(mu_mask, axis=1) == 2) &
+                    (ak.sum(e_veto, axis=1) == 0) &
+                    (ak.sum(ch_tau_mask, axis=1) >= 1) &
+                    mr_z_ok
+                )
+
+                # we can use the charge criteria to ensure orthogonality with the 2lSS1th
+                # and 2l2th SRs
+                mr_all_iso = (
+                    ak.sum(ch_tau_mask & tau_iso_mask, axis=1) == ak.sum(ch_tau_mask, axis=1)
+                )
+                mr_total_charge = (
+                    ak.sum(events.Muon.charge[mu_ctrl], axis=1) +
+                    ak.sum(events.Tau.charge[ch_tau_mask], axis=1)
+                )
+                base_ok = base_ok & (
+                    (np.abs(ak.sum(events.Muon.charge[mu_ctrl], axis=1)) == 0) &
+                    ((ak.sum(ch_tau_mask, axis=1) != 2) | ~mr_all_iso |
+                        (np.abs(mr_total_charge) != 0))
+                )
+
+                if not disable_triggers:
+                    base_ok = base_ok & fired
+
+                ok = ak.where(base_ok, ok, False)
+
+                sel_muon_mask = sel_muon_mask | (ok & mu_ctrl)
+                sel_loosemuon_mask = sel_loosemuon_mask | (ok & mu_veto)
+                sel_tightmuon_mask = sel_tightmuon_mask | (ok & mu_mask)
+                sel_tau_mask = sel_tau_mask | (ok & ch_tau_mask)
+                sel_isotau_mask = sel_isotau_mask | (ok & (ch_tau_mask & tau_iso_mask))
+
+                mu_charge = events.Muon.charge[mu_mask]
+                # tau_charge = events.Tau.charge[ch_tau_mask]
+                chargeok = (np.abs((ak.sum(mu_charge, axis=1))) == 0)
+                leptons_os = ak.where(ok, chargeok, leptons_os)
+
+                tight_ok = ok & (ak.sum((ch_tau_mask & tau_iso_mask), axis=1) >= 1)
+                tight_sel = tight_sel | tight_ok
+
+                trig_match_ok = base_ok
+                if tid in tids.single_mu:
+                    trig_match_ok = trig_match_ok & mu_only_emutau & (ak.sum(mu_match & mu_ctrl, axis=1) >= 1)
+                elif tid in tids.double_mu:
+                    trig_match_ok = trig_match_ok & (
+                        (ak.sum(mu_match & mu_ctrl, axis=1) >= 1)
+                    )
+
+                trig_match = trig_match | trig_match_ok
+
+                single_triggered = ak.where(trig_match_ok, True, single_triggered)
+                ids = ak.where(trig_match_ok, np.float32(tid), np.float32(np.nan))
+
         # accumulate over triggers
             good_evt = ak.where(ok, True, good_evt)
 
@@ -2439,5 +3170,17 @@ def lepton_selection(
 
 @lepton_selection.init
 def lepton_selection_init(self: Selector, **kwargs) -> None:
-    # add column to load the raw tau tagger score
-    self.uses.add(f"Tau.raw{self.config_inst.x.tau_tagger}VSjet")
+    # add column to load the raw tau tagger score for tau sorting
+    tagger = self.config_inst.x.tau_tagger
+    # For sorting, always use raw scores; for PNet this is "rawPNetVSjet",
+    # for DeepTau this is "rawDeepTau...VSjet"
+    self.uses.add(f"Tau.raw{tagger}VSjet")
+
+    # ensuring the v15 jetID fix required for the ttbar mr jet selection
+    if self.ffmr and self.config_inst.x.jet_id_has_multiplicity:
+        self.uses.add(jet_id)
+
+
+# fills the measurement regions instead of the physics channels, used by the default_ffmr selector.
+# the two never run together, so all output columns keep their usual names
+lepton_selection_ffmr = lepton_selection.derive("lepton_selection_ffmr", cls_dict={"ffmr": True})

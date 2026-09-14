@@ -1,8 +1,9 @@
 [submodule "modules/columnflow"]
     path = modules/columnflow
-	url = git@github.com:HEP-KBFI/columnflow.git
+    url = https://github.com/HEP-KBFI/columnflow.git
     branch = hhmultilepton_run3_dev
 
 [submodule "modules/cmsdb"]
     path = modules/cmsdb
-    url = ../../uhh-cms/cmsdb.git
+    url = https://github.com/uhh-cms/cmsdb.git
+    branch = master

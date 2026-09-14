@@ -152,11 +152,60 @@ def patch_slurm_partition_setting():
     logger.debug(f"patched slurm partition/flavor settings of {RemoteWorkflow.task_family}")
 
 
+# variables to make visible to the condor job
+# (MULTILEPTON_CONDOR_SPRACE is a flag gating the condor-sprace-config)
+forward_env_variables = [
+    "WLCG_FILE_SYSTEM",
+    "MULTILEPTON_TRIGGER_SF_BASE",
+    "CF_WLCG_CACHE_MAX_SIZE",
+    "CF_WLCG_CACHE_GLOBAL_LOCK",
+    "MULTILEPTON_CONDOR_SPRACE",
+    "MULTILEPTON_LFN_SOURCES",
+    "MULTILEPTON_WLCG_RETRIES",
+    "MULTILEPTON_WLCG_RETRY_DELAY",
+    "MULTILEPTON_RES_CALIBRATE",
+    "MULTILEPTON_RES_SELECT",
+    "MULTILEPTON_RES_PRODUCE",
+]
+
+
+@memoize
+def patch_htcondor_forward_site_env():
+    """
+    Adding the needed exports on top of what is in "cf_pre_setup_command".
+    """
+    from columnflow.tasks.framework.remote import HTCondorWorkflow
+
+    orig_htcondor_job_config = HTCondorWorkflow.htcondor_job_config
+
+    def htcondor_job_config(self, config, job_num, branches):
+        config = orig_htcondor_job_config(self, config, job_num, branches)
+
+        cmds = [
+            f"export {name}='{os.environ[name]}';"
+            for name in forward_env_variables
+            if os.environ.get(name)
+        ]
+
+        prev_cmd = (config.render_variables.get("cf_pre_setup_command") or "").strip()
+        if prev_cmd:
+            cmds.append(prev_cmd)
+        config.render_variables["cf_pre_setup_command"] = " ".join(cmds)
+
+        return config
+
+    HTCondorWorkflow.htcondor_job_config = htcondor_job_config
+    logger.debug(f"patched htcondor_job_config of {HTCondorWorkflow.task_family} to forward site env")
+
+
 @memoize
 def patch_all():
     patch_bundle_repo_exclude_files()
     patch_remote_workflow_poll_interval()
     patch_slurm_partition_setting()
+    # gating the specific condor-sprace setup changes under the corresponding setup.sh
+    if os.environ.get("MULTILEPTON_CONDOR_SPRACE", "false").lower() in ("true", "1", "yes"):
+        patch_htcondor_forward_site_env()
     # patch_merge_reduction_stats_inputs()
     # patch_columnar_pyarrow_version()
     # patch_missing_xsec_handling()

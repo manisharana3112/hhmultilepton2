@@ -89,10 +89,12 @@ def default(self: Calibrator, events: ak.Array, **kwargs) -> ak.Array:
     else:
         # for mc, when the nominal shift is requested, apply calibrations with uncertainties (i.e. full), otherwise
         # invoke calibrators configured not to evaluate and save uncertainties
+        jer_available = self.config_inst.x("jer_available", True)
         if task.global_shift_inst.is_nominal:
             # full jec and jer
             events = self[self.jec_full_cls](events, **kwargs)
-            events = self[self.deterministic_jer_jec_full_cls](events, **kwargs)
+            if jer_available:
+                events = self[self.deterministic_jer_jec_full_cls](events, **kwargs)
             # full tec
             events = self[self.tec_full_cls](events, **kwargs)
             # full ess
@@ -100,7 +102,8 @@ def default(self: Calibrator, events: ak.Array, **kwargs) -> ak.Array:
         else:
             # nominal jec and jer
             events = self[self.jec_nominal_cls](events, **kwargs)
-            events = self[self.deterministic_jec_jec_nominal_cls](events, **kwargs)
+            if jer_available:
+                events = self[self.deterministic_jec_jec_nominal_cls](events, **kwargs)
             # nominal tec
             events = self[self.tec_nominal_cls](events, **kwargs)
             # nominal ess
@@ -183,13 +186,19 @@ def default_init(self: Calibrator, **kwargs) -> None:
     derived_calibrators = {
         self.jec_full_cls,
         self.jec_nominal_cls,
-        self.deterministic_jer_jec_full_cls,
-        self.deterministic_jec_jec_nominal_cls,
         self.tec_full_cls,
         self.tec_nominal_cls,
         IF_RUN_3(self.ess_full_cls),
         IF_RUN_3(self.ess_nominal_cls),
         self.met_phi_cls,
     }
+    # only declare the jer-derived calibrators as dependencies (and thus trigger their
+    # run_setup, which reads the JER corrections from jet_jerc.json.gz) when corrections are
+    # actually available for this config/year; see cfg.x.jer_available in configs_multilepton.py
+    if self.config_inst.x("jer_available", True):
+        derived_calibrators |= {
+            self.deterministic_jer_jec_full_cls,
+            self.deterministic_jec_jec_nominal_cls,
+        }
     self.uses |= derived_calibrators
     self.produces |= derived_calibrators
