@@ -2,7 +2,7 @@
 
 """
 Gen-matching selection: classify selected leptons/taus using NanoAOD genPartFlav
-(Run3-style, no GenPart/GenVisTau/GenJet dR matching).
+(Run3-style, no dR matching; charge flips use genPartIdx to compare reco vs gen charge).
 """
 
 from __future__ import annotations
@@ -24,39 +24,46 @@ logger = law.logger.get_logger(__name__)
 # genPartFlav reference (NanoAOD v12+, Run3)
 # ====================================================================
 # Electron_genPartFlav:
-#   0  = unmatched (jet fake)
-#   1  = prompt electron               -> genuine
-#  15  = from tau decay                -> genuine
-#   3  = photon conversion (old conv.) -> fake (conversion)
-#  22  = photon conversion             -> fake (conversion)
+#   1  = prompt electron                -> genuine
+#  15  = electron from prompt tau       -> genuine
+#  22  = prompt photon (conversion)     -> conversion
+#   5  = electron from b                -> fake
+#   4  = electron from c                -> fake
+#   3  = electron from light or unknown -> fake
+#   0  = unmatched                      -> fake
 #
 # Muon_genPartFlav:
-#   0  = unmatched (jet fake)
-#   1  = prompt muon                   -> genuine
-#  15  = from tau decay                -> genuine
-#   3  = light meson decay             -> fake
-#   4  = kaon decay                    -> fake
-#   5  = heavy flavor (b/c) decay      -> fake
+#   1  = prompt muon                    -> genuine
+#  15  = muon from prompt tau           -> genuine
+#   5  = muon from b                    -> fake
+#   4  = muon from c                    -> fake
+#   3  = muon from light or unknown     -> fake
+#   0  = unmatched                      -> fake
 #
 # Tau_genPartFlav:
-#   5  = genuine hadronic tau
-#   1,3 = electron faking tau
-#   2,4 = muon faking tau
-#   0  = jet faking tau
+#   5  = hadronic tau decay             -> genuine
+#   1,3 = prompt e / tau->e decay       -> e faking tau
+#   2,4 = prompt mu / tau->mu decay     -> mu faking tau
+#   0  = unknown or unmatched           -> jet faking tau
 # ====================================================================
 
 @selector(
     uses={
         "channel_id",
         IF_MC("Electron.genPartFlav"),
+        IF_MC("Electron.genPartIdx"),
         "Electron.charge",
         "ElectronLoose",
         IF_MC("Muon.genPartFlav"),
+        IF_MC("Muon.genPartIdx"),
         "Muon.charge",
         "MuonLoose",
         IF_MC("Tau.genPartFlav"),
+        IF_MC("Tau.genPartIdx"),
         "Tau.charge",
         "TauIso",
+        IF_MC("GenPart.pdgId"),
+        IF_MC("GenVisTau.charge"),
     },
     produces={
         # produced for both MC and data (data gets a neutral "nonfakes" default; downstream
@@ -85,7 +92,7 @@ def gen_matching_selection(
     **kwargs,
 ) -> tuple[ak.Array, SelectionResult]:
     """
-    Run3-style gen-matching classification using genPartFlav only:
+    Run3-style gen-matching classification using genPartFlav (+ genPartIdx for charge flips):
     ...
     """
 
@@ -105,7 +112,7 @@ def gen_matching_selection(
     logger.info_once("Running Run3 genPartFlav-based gen_matching_selection")
     apply_lepton_gen_matching = bool(self.config_inst.x("apply_lepton_gen_matching", True))
     apply_hadTau_gen_matching = bool(self.config_inst.x("apply_hadTau_gen_matching", True))
-    use_flips = bool(self.config_inst.x("use_flips", False))
+    use_flips = bool(self.config_inst.x("use_flips", True))
     use_flips_hadtau = bool(self.config_inst.x("use_flips_hadtau", False))
     use_gen_tau_and_fake_tau = bool(self.config_inst.x("use_gen_tau_and_fake_tau", False))
 
@@ -121,14 +128,14 @@ def gen_matching_selection(
     # ── Electrons ────────────────────────────────────────────────────────────
     e_is_lepton = (e_flav == 1)                               # prompt e
     e_is_gentau = (e_flav == 15)                              # e from tau decay -> genuine
-    e_is_photon = (e_flav == 3) | (e_flav == 22)              # conversion -> fake  # FIX E221
-    e_is_jet = ~(e_is_lepton | e_is_gentau | e_is_photon)     # catch-all, includes flav 4/5 too
+    e_is_photon = (e_flav == 22)                              # prompt photon -> conversion
+    e_is_jet = ~(e_is_lepton | e_is_gentau | e_is_photon)     # catch-all: flav 0/3/4/5 -> fake
 
     # ── Muons ────────────────────────────────────────────────────────────────
     mu_is_lepton = (mu_flav == 1)                             # prompt mu
     mu_is_gentau = (mu_flav == 15)                            # mu from tau decay -> genuine  # FIX E221
     mu_is_photon = ak.zeros_like(mu_flav, dtype=bool)         # muons: no photon conversion category
-    mu_is_jet = (mu_flav == 0) | (mu_flav == 3) | (mu_flav == 4) | (mu_flav == 5)
+    mu_is_jet = (mu_flav == 0) | (mu_flav == 3) | (mu_flav == 4) | (mu_flav == 5)  # unmatched, light, c, b
 
     # ── HadTaus ──────────────────────────────────────────────────────────────
     tau_is_hadtau = (tau_flav == 5)                           # genuine hadronic tau  # FIX E221
@@ -136,13 +143,30 @@ def gen_matching_selection(
     tau_is_mu = (tau_flav == 2) | (tau_flav == 4)             # mu -> tau fake        # FIX E221
     tau_is_jet = (tau_flav == 0)                              # jet -> tau fake
 
-    # FIX F841: removed unused e_is_genuine, mu_is_genuine, tau_is_genuine
-    # (charge-flip not derivable from genPartFlav alone; flip counters set to zero below)
+    # ── Charge flips ─────────────────────────────────────────────────────────
+    # genuine lepton (prompt or from tau) whose reco charge disagrees with the charge of the
+    # matched gen particle; gen charge = -sign(pdgId) (pdgId +11/+13 = e-/mu-).
+    # Tau_genPartIdx points into GenVisTau (not GenPart) for genuine hadronic taus.
+    def _matched(coll, idx):
+        # genPartIdx == -1 means unmatched -> None, filled as False below;
+        # the upper bound guards against an index into a different gen collection
+        return coll[ak.mask(idx, (idx >= 0) & (idx < ak.num(coll, axis=1)))]
 
-    # Charge flips: not derivable from genPartFlav alone -> set to zero
-    e_is_flip = ak.zeros_like(e_flav, dtype=bool)
-    mu_is_flip = ak.zeros_like(mu_flav, dtype=bool)
-    tau_is_flip = ak.zeros_like(tau_flav, dtype=bool)
+    e_gen_pdgid = _matched(events.GenPart.pdgId, e_sel.genPartIdx)
+    mu_gen_pdgid = _matched(events.GenPart.pdgId, mu_sel.genPartIdx)
+    tau_gen_charge = _matched(events.GenVisTau.charge, tau_sel.genPartIdx)
+
+    # require the matched gen particle to be the same lepton flavour (a few genPartFlav==1
+    # electrons are matched to a photon, whose pdgId carries no charge information)
+    e_is_flip = ak.fill_none(
+        (e_is_lepton | e_is_gentau) & (abs(e_gen_pdgid) == 11) & (e_sel.charge != -np.sign(e_gen_pdgid)),
+        False,
+    )
+    mu_is_flip = ak.fill_none(
+        (mu_is_lepton | mu_is_gentau) & (abs(mu_gen_pdgid) == 13) & (mu_sel.charge != -np.sign(mu_gen_pdgid)),
+        False,
+    )
+    tau_is_flip = ak.fill_none(tau_is_hadtau & (tau_sel.charge != tau_gen_charge), False)
 
     # Event-level counts
     selLeptons_numGenMatchedLeptons = ak.sum(e_is_lepton, axis=1) + ak.sum(mu_is_lepton, axis=1)
